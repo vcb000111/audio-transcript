@@ -13,7 +13,7 @@ HUB_PUBLIC_URL = os.getenv("HUB_PUBLIC_URL", "http://localhost:8000")
 MAX_CONCURRENT_GPUS = int(os.getenv("MAX_CONCURRENT_GPUS", "100"))
 WORKER_DOCKER_IMAGE = os.getenv("WORKER_DOCKER_IMAGE", "docker.io/library/vast-translator:latest")
 
-VAST_API_URL = "https://console.vast.ai/api/v0"
+VAST_API_URL = "https://console.vast.ai/api/v1"
 
 def get_headers():
     return {
