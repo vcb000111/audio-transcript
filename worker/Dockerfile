@@ -1,5 +1,8 @@
 FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-runtime
 
+# Tránh hộp thoại cấu hình tzdata tương tác gây treo tiến trình build
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Cài đặt FFmpeg và Git
 RUN apt-get update && apt-get install -y \
     ffmpeg \
