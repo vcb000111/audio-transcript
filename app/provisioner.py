@@ -4,6 +4,11 @@ import json
 import requests
 import threading
 from datetime import datetime, timedelta
+from dotenv import load_dotenv
+
+# Đảm bảo load config từ file .env ở thư mục gốc
+load_dotenv(dotenv_path=os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"), override=True)
+
 from app.database import (
     get_pending_jobs, get_processing_jobs, update_job_status, get_db_connection
 )
@@ -13,7 +18,10 @@ HUB_PUBLIC_URL = os.getenv("HUB_PUBLIC_URL", "http://localhost:8000")
 MAX_CONCURRENT_GPUS = int(os.getenv("MAX_CONCURRENT_GPUS", "100"))
 WORKER_DOCKER_IMAGE = os.getenv("WORKER_DOCKER_IMAGE", "docker.io/library/vast-translator:latest")
 
-VAST_API_URL = "https://console.vast.ai/api/v1"
+print(f"[Provisioner] Khởi động với cấu hình: HUB_PUBLIC_URL={HUB_PUBLIC_URL} | WORKER_IMAGE={WORKER_DOCKER_IMAGE}")
+
+VAST_API_URL_V0 = "https://console.vast.ai/api/v0"
+VAST_API_URL_V1 = "https://console.vast.ai/api/v1"
 
 def get_headers():
     return {
@@ -24,70 +32,81 @@ def get_headers():
 def get_vast_instances():
     """Lấy danh sách các instance hiện tại trên tài khoản Vast.ai"""
     if not VAST_API_KEY:
+        print("[Provisioner] Bỏ qua lấy instance do thiếu VAST_API_KEY.")
         return []
     try:
-        url = f"{VAST_API_URL}/instances/?api_key={VAST_API_KEY}"
+        url = f"{VAST_API_URL_V1}/instances/?api_key={VAST_API_KEY}"
+        print(f"[Provisioner] Gọi API Vast.ai lấy danh sách máy: GET {url}")
         res = requests.get(url, headers=get_headers(), timeout=15)
         if res.status_code == 200:
-            return res.json().get("instances", [])
+            instances = res.json().get("instances", [])
+            print(f"[Provisioner] Lấy danh sách thành công. Tìm thấy {len(instances)} instances.")
+            return instances
         else:
-            print(f"[Provisioner] Lỗi lấy danh sách instance: {res.status_code} - {res.text}")
+            print(f"[Provisioner] Lỗi API lấy danh sách instance: Status {res.status_code} - Phản hồi: {res.text}")
     except Exception as e:
-        print(f"[Provisioner] Lỗi kết nối Vast.ai: {e}")
+        print(f"[Provisioner] Lỗi kết nối Vast.ai khi lấy danh sách: {e}")
     return []
 
 def start_instance(instance_id: int):
     """Khởi động lại một instance đang bị Stopped"""
-    url = f"{VAST_API_URL}/instances/{instance_id}/?api_key={VAST_API_KEY}"
+    url = f"{VAST_API_URL_V0}/instances/{instance_id}/?api_key={VAST_API_KEY}"
+    print(f"[Provisioner] Yêu cầu khởi động máy {instance_id}: PUT {url}")
     try:
         res = requests.put(url, json={"state": "running"}, headers=get_headers(), timeout=15)
         if res.status_code == 200:
-            print(f"[Provisioner] Đã ra lệnh Start máy GPU {instance_id}")
+            print(f"[Provisioner] Đã ra lệnh Start máy GPU {instance_id} thành công.")
             return True
         else:
-            print(f"[Provisioner] Lỗi start máy GPU {instance_id}: {res.text}")
+            print(f"[Provisioner] Lỗi start máy GPU {instance_id}: Status {res.status_code} - Phản hồi: {res.text}")
     except Exception as e:
-        print(f"[Provisioner] Lỗi start máy GPU: {e}")
+        print(f"[Provisioner] Lỗi kết nối khi start máy GPU {instance_id}: {e}")
     return False
 
 def destroy_instance(instance_id: int):
     """Hủy hoàn toàn một instance để dừng tính tiền"""
-    url = f"{VAST_API_URL}/instances/{instance_id}/?api_key={VAST_API_KEY}"
+    url = f"{VAST_API_URL_V0}/instances/{instance_id}/?api_key={VAST_API_KEY}"
+    print(f"[Provisioner] Yêu cầu hủy (Destroy) máy {instance_id} để dừng tính tiền: DELETE {url}")
     try:
         res = requests.delete(url, headers=get_headers(), timeout=15)
         if res.status_code == 200:
-            print(f"[Provisioner] Đã ra lệnh Destroy máy GPU {instance_id}")
+            print(f"[Provisioner] Đã ra lệnh Destroy máy GPU {instance_id} thành công.")
             return True
         else:
-            print(f"[Provisioner] Lỗi destroy máy GPU {instance_id}: {res.text}")
+            print(f"[Provisioner] Lỗi destroy máy GPU {instance_id}: Status {res.status_code} - Phản hồi: {res.text}")
     except Exception as e:
-        print(f"[Provisioner] Lỗi destroy máy GPU: {e}")
+        print(f"[Provisioner] Lỗi kết nối khi destroy máy GPU {instance_id}: {e}")
     return False
 
-def rent_new_gpu():
-    """Tìm kiếm và thuê thêm 1 GPU RTX 4090 rẻ nhất"""
+def rent_new_gpu() -> str:
+    """Tìm kiếm và thuê thêm 1 GPU RTX 4090 rẻ nhất có mạng >= 1 Gbps, trả về contract_id nếu thành công"""
     if not VAST_API_KEY:
         print("[Provisioner] Chưa cấu hình VAST_API_KEY, bỏ qua thuê máy.")
-        return False
+        return None
         
     try:
-        # Search query cho RTX 4090
+        # Search query cho RTX 4090 có tốc độ mạng tải xuống tối thiểu 1 Gbps (1000 Mbps)
         query = {
             "gpu_name": {"eq": "RTX 4090"},
             "rentable": {"eq": True},
-            "verified": {"eq": True}
+            "verified": {"eq": True},
+            "inet_down": {"gte": 1000.0},
+            "order": [["score", "desc"]],
+            "type": "on-demand",
+            "allocated_storage": 30.0
         }
-        search_url = f"{VAST_API_URL}/bundle/?q={json.dumps(query)}&api_key={VAST_API_KEY}"
-        res = requests.get(search_url, headers=get_headers(), timeout=15)
+        search_url = f"{VAST_API_URL_V0}/bundles/?api_key={VAST_API_KEY}"
+        print(f"[Provisioner] Đang tìm kiếm GPU RTX 4090 trống rẻ nhất (mạng >= 1Gbps): POST {search_url} | Query: {query}")
+        res = requests.post(search_url, json=query, headers=get_headers(), timeout=15)
         
         if res.status_code != 200:
-            print(f"[Provisioner] Lỗi tìm kiếm GPU: {res.status_code} - {res.text}")
-            return False
+            print(f"[Provisioner] Lỗi tìm kiếm GPU: Status {res.status_code} - Phản hồi: {res.text}")
+            return None
             
         offers = res.json().get("offers", [])
         if not offers:
             print("[Provisioner] Không tìm thấy máy GPU RTX 4090 nào trống để thuê.")
-            return False
+            return None
             
         # Sắp xếp theo giá từ thấp đến cao (dph_total: dollars per hour total)
         offers.sort(key=lambda x: x.get("dph_total", 999.0))
@@ -95,64 +114,142 @@ def rent_new_gpu():
         offer_id = cheapest_offer["id"]
         price = cheapest_offer.get("dph_total", 0.0)
         
-        print(f"[Provisioner] Tìm thấy GPU RTX 4090 rẻ nhất: Offer ID {offer_id}, Giá {price}$/giờ")
+        print(f"[Provisioner] Tìm thấy GPU RTX 4090 rẻ nhất: Offer ID {offer_id}, Host ID {cheapest_offer.get('host_id')}, Giá {price}$/giờ, Mạng down: {cheapest_offer.get('inet_down')} Mbps")
         
         # Gọi lệnh thuê máy
-        rent_url = f"{VAST_API_URL}/asks/{offer_id}/?api_key={VAST_API_KEY}"
+        rent_url = f"{VAST_API_URL_V0}/asks/{offer_id}/?api_key={VAST_API_KEY}"
         payload = {
+            "client_id": "me",
             "image": WORKER_DOCKER_IMAGE,
             "env": {"HUB_URL": HUB_PUBLIC_URL},
             "disk": 30.0, # 30GB đủ cho CUDA runtime + cache models
             "runtype": "args"
         }
-        rent_res = requests.post(rent_url, json=payload, headers=get_headers(), timeout=15)
+        print(f"[Provisioner] Đang tiến hành thuê máy: PUT {rent_url} | Payload: {payload}")
+        rent_res = requests.put(rent_url, json=payload, headers=get_headers(), timeout=15)
         
         if rent_res.status_code == 200:
             contract_id = rent_res.json().get("new_contract")
-            print(f"[Provisioner] Thuê máy thành công! Contract ID: {contract_id}")
-            return True
+            print(f"[Provisioner] Thuê máy thành công! Contract ID / Instance ID mới: {contract_id}")
+            return str(contract_id)
         else:
-            print(f"[Provisioner] Lỗi thuê máy: {rent_res.status_code} - {rent_res.text}")
+            print(f"[Provisioner] Lỗi thuê máy: Status {rent_res.status_code} - Phản hồi: {rent_res.text}")
             
     except Exception as e:
-        print(f"[Provisioner] Lỗi trong quá trình thuê GPU: {e}")
-    return False
+        print(f"[Provisioner] Lỗi hệ thống trong quá trình thuê GPU: {e}")
+    return None
 
 def handle_timeouts():
-    """Kiểm tra các job PROCESSING quá lâu (30 phút) và đánh dấu lỗi"""
+    """Kiểm tra các job PROCESSING quá lâu (30 phút) hoặc PENDING đã gán máy quá lâu (25 phút) để reset/hủy"""
     try:
-        processing_jobs = get_processing_jobs()
         now = datetime.now()
+        # 1. Timeout cho các job PROCESSING quá 30 phút
+        processing_jobs = get_processing_jobs()
         for job in processing_jobs:
             updated_at = datetime.fromisoformat(job["updated_at"])
-            # Nếu chạy quá 30 phút mà chưa xong
             if now - updated_at > timedelta(minutes=30):
-                print(f"[Provisioner] Phát hiện Job {job['id']} bị timeout xử lý. Chuyển sang trạng thái FAILED.")
+                print(f"[Provisioner] [TIMEOUT] Phát hiện Job {job['id']} bị kẹt PROCESSING quá 30 phút. Chuyển trạng thái sang FAILED.")
                 update_job_status(job["id"], "FAILED: Xử lý quá thời gian quy định (Timeout 30 phút)")
+                
+        # 2. Reset các job PENDING đã gán máy ảo quá lâu nhưng worker chưa claim (quá 25 phút)
+        # Đồng thời hủy (destroy) máy ảo cũ bị kẹt để tránh tốn tiền tài khoản của sếp
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM jobs WHERE status = 'PENDING' AND vast_contract_id IS NOT NULL")
+        rows = cursor.fetchall()
+        for row in rows:
+            job = dict(row)
+            updated_at = datetime.fromisoformat(job["updated_at"])
+            if now - updated_at > timedelta(minutes=25):
+                stuck_instance_id = job['vast_contract_id']
+                print(f"[Provisioner] [TIMEOUT] Job {job['id']} đã gán máy {stuck_instance_id} quá 25 phút nhưng worker chưa nhận.")
+                
+                # Ra lệnh hủy máy bị kẹt
+                try:
+                    destroy_instance(int(stuck_instance_id))
+                except Exception as dest_err:
+                    print(f"[Provisioner] Không thể tự động hủy máy kẹt {stuck_instance_id}: {dest_err}")
+                
+                # Reset DB về NULL để Provisioner thuê máy khác ở chu kỳ tiếp theo
+                print(f"[Provisioner] [TIMEOUT] Reset vast_contract_id về NULL cho Job {job['id']} để chuẩn bị cấp phát lại máy mới.")
+                cursor.execute("UPDATE jobs SET vast_contract_id = NULL, updated_at = ? WHERE id = ?", (now.isoformat(), job["id"]))
+        conn.commit()
+        conn.close()
     except Exception as e:
-        print(f"[Provisioner] Lỗi xử lý timeout: {e}")
+        print(f"[Provisioner] Lỗi trong quá trình xử lý timeouts: {e}")
 
 def run_provisioner_cycle():
     """Thực thi một chu kỳ kiểm tra và phân phối tài nguyên"""
     pending_jobs = get_pending_jobs()
     pending_count = len(pending_jobs)
     
-    if pending_count == 0:
-        # Không có job pending nào, kiểm tra xem có máy nào rảnh (stopped) để hủy không
-        # Nếu muốn tiết kiệm tối đa, có thể destroy các máy Stopped
-        instances = get_vast_instances()
+    # 1. Lấy danh sách instances thực tế trên Vast.ai
+    instances = get_vast_instances()
+    instance_states = {str(inst["id"]): inst for inst in instances} if instances else {}
+    
+    # 2. Tự động phát hiện và xử lý sớm các máy ảo bị chết/lỗi (stopped) của các Job PENDING
+    if pending_jobs and instances:
+        needs_reload = False
+        for job in pending_jobs:
+            contract_id = job.get("vast_contract_id")
+            if contract_id:
+                inst = instance_states.get(str(contract_id))
+                if inst:
+                    status = inst.get("actual_status", "")
+                    state = inst.get("cur_state", "")
+                    # Nếu máy ảo của job PENDING đã bị dừng/thoát do lỗi container
+                    if status == "stopped" or state == "stopped":
+                        print(f"[Provisioner] [TỰ SỬA LỖI] Máy ảo {contract_id} của Job {job['id']} đã dừng/lỗi. Tiến hành hủy máy và reset DB.")
+                        destroy_instance(inst["id"])
+                        try:
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE jobs SET vast_contract_id = NULL, updated_at = ? WHERE id = ?", (datetime.now().isoformat(), job["id"]))
+                            conn.commit()
+                            conn.close()
+                            needs_reload = True
+                        except Exception as db_err:
+                            print(f"[Provisioner] Lỗi DB khi reset job: {db_err}")
+        if needs_reload:
+            pending_jobs = get_pending_jobs()
+            pending_count = len(pending_jobs)
+
+    # 3. Thu thập các contract_id đang bận xử lý (PROCESSING) hoặc được gán cho job pending
+    busy_contracts = set()
+    for job in get_processing_jobs():
+        if job.get("vast_contract_id"):
+            busy_contracts.add(str(job["vast_contract_id"]))
+    for job in pending_jobs:
+        if job.get("vast_contract_id"):
+            busy_contracts.add(str(job["vast_contract_id"]))
+            
+    # 4. Quét và Hủy ngay lập tức mọi máy ảo thừa (không có liên kết với job nào trong DB) để bảo vệ ví của sếp
+    if instances:
+        cleaned_instances = []
         for inst in instances:
-            # Nếu máy bị stopped và container đã hoàn thành (không có job chạy)
-            if inst.get("actual_status") == "stopped" or inst.get("cur_state") == "stopped":
-                # Chỉ hủy nếu không muốn duy trì Stopped instance
-                # (Mặc định: hủy luôn để tránh tốn $0.01/giờ nếu không có nhu cầu tối ưu cold start)
+            inst_id_str = str(inst["id"])
+            if inst_id_str not in busy_contracts:
+                print(f"[Provisioner] [DỌN DẸP] Phát hiện máy ảo thừa {inst_id_str} (không liên kết với job nào). Tiến hành hủy ngay lập tức.")
                 destroy_instance(inst["id"])
+            else:
+                cleaned_instances.append(inst)
+        instances = cleaned_instances
+
+    if pending_count == 0:
+        # Không có job pending nào và các máy thừa đã được dọn dẹp ở trên
         return
 
-    # Có job pending, xử lý
-    instances = get_vast_instances()
-    
-    # Đếm số máy đang chạy hoặc đang chuẩn bị chạy
+    # Lọc các job pending chưa được gán máy ảo
+    unassigned_jobs = [j for j in pending_jobs if not j.get("vast_contract_id")]
+    unassigned_count = len(unassigned_jobs)
+
+    if unassigned_count == 0:
+        # Tất cả các job pending đã được gán máy ảo đang khởi động
+        print(f"[Provisioner] Hàng đợi có {pending_count} Job PENDING. Tất cả đã được gán máy ảo và đang đợi khởi động xong.")
+        return
+
+    # Có job pending chưa gán máy ảo, tiến hành phân phối
+    # Đếm số máy đang chạy hoặc đang chuẩn bị chạy từ những instance còn lại
     active_instances = []
     stopped_instances = []
     
@@ -166,22 +263,37 @@ def run_provisioner_cycle():
             stopped_instances.append(inst)
 
     active_count = len(active_instances)
+    active_ids = [inst["id"] for inst in active_instances]
+    stopped_ids = [inst["id"] for inst in stopped_instances]
     
-    print(f"[Provisioner] Hàng đợi: {pending_count} Job PENDING | Đang hoạt động: {active_count} GPU | Giới hạn tối đa: {MAX_CONCURRENT_GPUS}")
+    print(f"[Provisioner] [CHU KỲ] Hàng đợi: {pending_count} PENDING ({unassigned_count} chưa gán) | Active: {active_count} GPU {active_ids} | Stopped: {len(stopped_instances)} GPU {stopped_ids}")
     
-    # Nếu số lượng job lớn hơn số GPU đang hoạt động và chưa vượt quá giới hạn
-    if pending_count > active_count and active_count < MAX_CONCURRENT_GPUS:
-        needed_gpus = min(pending_count - active_count, MAX_CONCURRENT_GPUS - active_count)
-        print(f"[Provisioner] Cần thêm {needed_gpus} GPU để xử lý hàng đợi.")
+    # Chỉ thuê máy cho những job chưa gán máy và chưa vượt giới hạn
+    if active_count < MAX_CONCURRENT_GPUS:
+        needed = min(unassigned_count, MAX_CONCURRENT_GPUS - active_count)
+        print(f"[Provisioner] Cần cấp phát thêm {needed} GPU cho các job chưa gán.")
         
-        for _ in range(needed_gpus):
+        for i in range(needed):
+            job = unassigned_jobs[i]
+            job_id = job["id"]
+            
             # Ưu tiên khởi động lại máy đang Stopped để tránh Cold Start tải image
             if stopped_instances:
                 target_inst = stopped_instances.pop(0)
-                start_instance(target_inst["id"])
+                inst_id = target_inst["id"]
+                print(f"[Provisioner] Ưu tiên tái sử dụng máy Stopped {inst_id} cho Job {job_id}")
+                if start_instance(inst_id):
+                    update_job_status(job_id, "PENDING", vast_contract_id=str(inst_id))
+                    print(f"[Provisioner] Đã gán thành công máy Stopped {inst_id} cho Job {job_id}")
             else:
                 # Nếu không có máy stopped, thuê máy mới
-                rent_new_gpu()
+                print(f"[Provisioner] Không có máy Stopped. Tiến hành thuê máy mới cho Job {job_id}...")
+                contract_id = rent_new_gpu()
+                if contract_id:
+                    update_job_status(job_id, "PENDING", vast_contract_id=contract_id)
+                    print(f"[Provisioner] Đã gán thành công máy mới {contract_id} cho Job {job_id}")
+                else:
+                    print(f"[Provisioner] Thất bại khi thuê máy mới cho Job {job_id}.")
                 # Nghỉ ngắn giữa các lần thuê tránh bị Vast.ai rate-limit
                 time.sleep(2)
 
@@ -195,7 +307,7 @@ def provisioner_daemon():
             handle_timeouts()
             run_provisioner_cycle()
         except Exception as e:
-            print(f"[Provisioner] Lỗi trong chu kỳ daemon: {e}")
+            print(f"[Provisioner] Lỗi nghiêm trọng trong chu kỳ daemon: {e}")
         time.sleep(15)
 
 def start_provisioner_loop():

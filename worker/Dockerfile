@@ -11,7 +11,12 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Cài đặt các thư viện Python
+# Cài đặt các thư viện Python (ép phiên bản tương thích với PyTorch 2.1.2 + CUDA 12.1)
+RUN pip install --no-cache-dir \
+    torchaudio==2.1.2 \
+    torchvision==0.16.2 \
+    --index-url https://download.pytorch.org/whl/cu121
+
 RUN pip install --no-cache-dir \
     faster-whisper \
     transformers \

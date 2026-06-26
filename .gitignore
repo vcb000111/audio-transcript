@@ -12,6 +12,8 @@ app.db
 storage/
 video_temp/
 test_video.mp4
+*.mp3
+*.mp4
 
 # Python cache và build artifacts
 __pycache__/
