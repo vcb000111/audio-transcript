@@ -1,12 +1,11 @@
 import os
-from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download
 from transformers import AutoTokenizer
 
 def cache():
     print("[Cache] Đang tải sẵn model Faster-Whisper (large-v3)...")
-    # Tải cache model Whisper
-    WhisperModel("large-v3", device="cpu", compute_type="float32", download_only=True)
+    # Tải cache model Whisper qua HuggingFace Hub snapshot
+    snapshot_download(repo_id="Systran/faster-whisper-large-v3")
     
     print("[Cache] Đang tải sẵn model Qwen/Qwen2.5-7B-Instruct...")
     model_name = "Qwen/Qwen2.5-7B-Instruct"
