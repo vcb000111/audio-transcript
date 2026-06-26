@@ -23,6 +23,17 @@ print(f"[Provisioner] Khởi động với cấu hình: HUB_PUBLIC_URL={HUB_PUBL
 VAST_API_URL_V0 = "https://console.vast.ai/api/v0"
 VAST_API_URL_V1 = "https://console.vast.ai/api/v1"
 
+def get_current_git_sha():
+    """Lấy Git commit SHA hiện tại của repo local để định danh tag Docker image tránh cache"""
+    try:
+        import subprocess
+        sha = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+        print(f"[Provisioner] Git commit SHA cục bộ: {sha}")
+        return sha
+    except Exception as e:
+        print(f"[Provisioner] Bỏ qua lấy Git SHA do lỗi: {e}")
+        return None
+
 def get_headers():
     return {
         "Accept": "application/json",
@@ -93,7 +104,7 @@ def rent_new_gpu() -> str:
             "inet_down": {"gte": 1000.0},
             "order": [["score", "desc"]],
             "type": "on-demand",
-            "allocated_storage": 30.0
+            "allocated_storage": 40.0
         }
         search_url = f"{VAST_API_URL_V0}/bundles/?api_key={VAST_API_KEY}"
         print(f"[Provisioner] Đang tìm kiếm GPU RTX 4090 trống rẻ nhất (mạng >= 1Gbps): POST {search_url} | Query: {query}")
@@ -116,13 +127,22 @@ def rent_new_gpu() -> str:
         
         print(f"[Provisioner] Tìm thấy GPU RTX 4090 rẻ nhất: Offer ID {offer_id}, Host ID {cheapest_offer.get('host_id')}, Giá {price}$/giờ, Mạng down: {cheapest_offer.get('inet_down')} Mbps")
         
+        # Xác định image name kèm Git SHA tag để tránh cache
+        image_name = WORKER_DOCKER_IMAGE
+        if WORKER_DOCKER_IMAGE.endswith(":latest"):
+            sha = get_current_git_sha()
+            if sha:
+                base_image = WORKER_DOCKER_IMAGE.rsplit(":", 1)[0]
+                image_name = f"{base_image}:{sha}"
+                print(f"[Provisioner] Dùng tag Git SHA để tránh cache: {image_name}")
+
         # Gọi lệnh thuê máy
         rent_url = f"{VAST_API_URL_V0}/asks/{offer_id}/?api_key={VAST_API_KEY}"
         payload = {
             "client_id": "me",
-            "image": WORKER_DOCKER_IMAGE,
+            "image": image_name,
             "env": {"HUB_URL": HUB_PUBLIC_URL},
-            "disk": 30.0, # 30GB đủ cho CUDA runtime + cache models
+            "disk": 40.0, # 40GB đủ cho CUDA runtime + cache models không bị tràn overlayfs
             "runtype": "args"
         }
         print(f"[Provisioner] Đang tiến hành thuê máy: PUT {rent_url} | Payload: {payload}")

@@ -65,3 +65,52 @@ docker build -t <dockerhub_username>/vast-translator:latest .
 docker push <dockerhub_username>/vast-translator:latest
 ```
 *Lưu ý: Quá trình build Docker sẽ chạy script `cache_models.py` tải sẵn model Faster-Whisper và Qwen 2.5 7B. Dung lượng image sẽ khá lớn (khoảng 15GB), nhưng bù lại thời gian khởi động (cold start) trên Vast.ai sẽ giảm từ 8 phút xuống dưới 1 phút.*
+
+---
+
+## Hướng dẫn kiểm thử và vận hành thực tế
+
+Để thực hiện kiểm thử lại hệ thống hoặc chạy thực tế, vui lòng thực hiện theo các bước sau:
+
+### 1. Chuẩn bị đường truyền công khai
+Khởi động dịch vụ tạo đường truyền công khai để máy ảo Vast.ai có thể kết nối ngược về Hub local của sếp:
+```bash
+ngrok http 8000
+```
+Sau đó, sao chép địa chỉ `https://...ngrok-free.dev` thu được và cập nhật vào biến `HUB_PUBLIC_URL` trong file `.env`.
+
+### 2. Dọn dẹp dữ liệu cũ (Khuyên dùng)
+Trước khi bắt đầu lượt test mới, hãy xóa sạch các job cũ đang lưu trong cơ sở dữ liệu để tránh điều phối viên tự động thuê lại máy ảo cho các công việc cũ:
+```bash
+python clear_db.py
+```
+
+### 3. Chuẩn bị file video thực tế
+Sao chép video tiếng Nhật thực tế cần làm phụ đề vào thư mục gốc của dự án và đổi tên thành `real_test_video.mp4`.
+*(Lưu ý: Nếu không có file này, script kiểm thử sẽ tự động tạo một file âm thanh im lặng 3 giây để giả lập giúp luồng chạy không bị lỗi).*
+
+### 4. Khởi chạy Central Hub
+Mở một terminal mới tại thư mục gốc dự án và chạy:
+```bash
+uvicorn app.main:app --port 8000 --reload
+```
+Hub sẽ tự động tải cấu hình và chạy ngầm tiến trình điều phối quét hàng đợi.
+
+### 5. Thực thi luồng kiểm thử
+Mở terminal tiếp theo và khởi chạy script gửi job và giám sát:
+```bash
+$env:PYTHONIOENCODING="utf-8"; python test_real_gpu.py
+```
+Luồng xử lý tự động diễn ra:
+- Script gửi video lên Hub local.
+- Hub trích xuất audio `.mp3` dung lượng thấp và lưu trữ.
+- Điều phối viên quét thấy job `PENDING`, tự động gọi API Vast.ai thuê một GPU thích hợp (RTX 4090).
+- Máy ảo khởi động Docker image, kéo file audio `.mp3` về, chạy Whisper bóc băng chữ Nhật, chạy Qwen dịch tiếng Việt và callback trả phụ đề `.srt` về Hub.
+- Script test tự động phát hiện trạng thái `COMPLETED` và tải file phụ đề `.srt` về thư mục gốc dự án.
+- Hub tự động ra lệnh hủy máy ảo trên Vast.ai ngay lập tức để tiết kiệm chi phí.
+
+### 6. Dọn dẹp khẩn cấp máy ảo (Nếu cần)
+Trong trường hợp tiến trình bị ngắt quãng thủ công hoặc muốn đảm bảo không còn bất kỳ máy ảo nào đang chạy ngầm gây tốn chi phí trên tài khoản Vast.ai, chạy lệnh:
+```bash
+python destroy_all.py
+```
