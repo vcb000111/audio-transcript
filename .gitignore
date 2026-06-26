@@ -1,0 +1,41 @@
+# Cấu hình môi trường và bảo mật (BẮT BUỘC BỎ QUA)
+.env
+
+# Cơ sở dữ liệu SQLite local
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+app.db
+
+# Thư mục lưu trữ video, audio và srt tạm thời
+storage/
+video_temp/
+test_video.mp4
+
+# Python cache và build artifacts
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Thư mục môi trường ảo (Virtual Environment)
+venv/
+.venv/
+env/
+ENV/
+
+# Cấu hình IDE cá nhân
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+
+# Hệ điều hành
+.DS_Store
+Thumbs.db
