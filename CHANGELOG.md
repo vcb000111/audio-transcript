@@ -36,4 +36,5 @@ Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận
 - Nâng cấp mô hình dịch thuật sang `Qwen/Qwen3.5-9B-Instruct` (định dạng Safetensors chuẩn tương thích hoàn toàn với thư viện `transformers`).
 - Cấu hình bộ tham số sinh tối ưu cho chế độ **Non-Thinking** (`temperature=0.7`, `top_p=0.8`, `top_k=20`) giúp tăng tốc độ phản hồi tối đa, tiết kiệm chi phí chạy máy ảo Vast.ai.
 - Tích hợp bộ lọc regex tự động dọn dẹp và xóa sạch các thẻ `<think>...</think>` (đề phòng rò rỉ token suy nghĩ nếu sau này sếp chạy các model reasoning) để đảm bảo phụ đề đầu ra luôn sạch sẽ.
+- Khắc phục lỗi build Docker image bị nghẽn mạng do lỗi rate limit API Hugging Face (lỗi 429 Too Many Requests) bằng cách tích hợp hàm tự động tải lại thông minh `download_with_retry` có cơ chế tăng dần thời gian chờ (exponential backoff) trong script [cache_models.py](file:///d:/Projects/SubtitleVastAI/worker/cache_models.py).
 
