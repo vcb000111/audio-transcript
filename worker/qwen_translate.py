@@ -15,18 +15,30 @@ def format_srt_time(seconds: float) -> str:
         millis = 0
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
+def contains_foreign_script(text: str) -> bool:
+    """Kiểm tra xem chuỗi có chứa chữ Hán (Trung/Nhật Kanji), Hiragana, Katakana, chữ Thái hay chữ Hàn hay không"""
+    pattern = re.compile(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\u0e00-\u0e7f\uac00-\ud7a3]")
+    return bool(pattern.search(text))
+
 def translate_single_text(model, tokenizer, text, history_context=[], retries=2):
     system_prompt = (
-        "Bạn là một dịch giả phụ đề JAV chuyên nghiệp. Hãy dịch câu thoại tiếng Nhật sau sang tiếng Việt một cách tự nhiên, trôi chảy.\n"
-        "Lưu ý giữ đúng ngữ cảnh người lớn, từ lóng JAV tự nhiên, xưng hô phù hợp (anh - em, em - anh, tôi - cô,...).\n"
-        "Chỉ trả về bản dịch tiếng Việt duy nhất. Tuyệt đối không giải thích, không viết ghi chú, không markdown, không lặp lại câu gốc."
+        "Bạn là một dịch giả phụ đề phim người lớn JAV chuyên nghiệp từ tiếng Nhật sang tiếng Việt.\n"
+        "Nhiệm vụ của bạn là dịch câu thoại tiếng Nhật được yêu cầu sang tiếng Việt một cách tự nhiên, trôi chảy, đúng văn phong đời thường và giữ nguyên ngữ cảnh nhạy cảm, từ lóng JAV tự nhiên.\n"
+        "QUY TẮC XƯNG HÔ BẮT BUỘC:\n"
+        "- Em gái (Rino) gọi anh trai là 'Anh' hoặc 'Anh hai', xưng 'Em'.\n"
+        "- Anh trai gọi em gái là 'Em' hoặc 'Rino', xưng 'Anh'.\n"
+        "- Tuyệt đối KHÔNG dùng các từ xưng hô thô thiển hoặc dịch thô từ tiếng Anh như 'Anh bạn', 'Mày', 'Tao', 'Tôi' (trừ khi nhân vật cãi nhau to).\n"
+        "RÀNG BUỘC ĐẦU RA:\n"
+        "- Bản dịch bắt buộc phải là 100% TIẾNG VIỆT tự nhiên.\n"
+        "- Tuyệt đối KHÔNG chứa chữ Hán (Trung Quốc/Nhật Bản), chữ Thái Lan, chữ Hàn Quốc, hay tiếng Anh trong câu dịch.\n"
+        "- Chỉ trả về bản dịch tiếng Việt duy nhất, không giải thích, không viết ghi chú, không markdown, không lặp lại câu gốc."
     )
     
     context_str = ""
     if history_context:
-        context_str = "Các câu thoại và bản dịch trước đó để tham khảo ngữ cảnh:\n" + "\n".join(history_context) + "\n\n"
+        context_str = "Các câu thoại trước đó để tham khảo cách xưng hô đồng nhất:\n" + "\n".join(history_context) + "\n\n"
         
-    prompt = f"{context_str}Hãy dịch câu thoại tiếng Nhật này: {text}"
+    prompt = f"{context_str}Hãy dịch câu thoại tiếng Nhật này sang tiếng Việt: {text}"
     
     messages = [
         {"role": "system", "content": system_prompt},
@@ -52,12 +64,16 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
             
             # Làm sạch phản hồi
             response = response.strip('"\'')
-            if response and response != text:
+            
+            # Kiểm tra xem bản dịch có chứa chữ nước ngoài hay không
+            if response and response != text and not contains_foreign_script(response):
                 return response
+            else:
+                print(f"[LLM] Cảnh báo: Bản dịch câu '{text}' chứa chữ ngoại lai hoặc lặp lại gốc ở lần thử {attempt+1}: {response}")
         except Exception as e:
             print(f"[LLM] Lỗi khi dịch câu '{text}' ở lần thử {attempt+1}: {e}")
             
-    return text  # Fallback trả về câu gốc nếu thất bại
+    return text  # Fallback trả về câu gốc nếu thất bại sau các lần thử
 
 def main():
     parser = argparse.ArgumentParser(description="Translate Japanese text to Vietnamese using Qwen 2.5 7B")
@@ -102,7 +118,9 @@ def main():
         for h_idx in range(start_idx, idx):
             orig = segments[h_idx]["text"]
             trans = translated_texts[h_idx]
-            history.append(f"Gốc: {orig} -> Dịch: {trans}")
+            # CHỈ đưa vào ngữ cảnh nếu bản dịch sạch (không chứa chữ Trung/Nhật/Thái/Hàn)
+            if not contains_foreign_script(trans):
+                history.append(f"Gốc: {orig} -> Dịch: {trans}")
             
         print(f"[LLM] ({idx+1}/{len(segments)}) Dịch: {text}")
         translated_text = translate_single_text(model, tokenizer, text, history)
