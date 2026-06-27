@@ -207,32 +207,66 @@ def run_provisioner_cycle():
     instances = get_vast_instances()
     instance_states = {str(inst["id"]): inst for inst in instances} if instances else {}
     
-    # 2. Tự động phát hiện và xử lý sớm các máy ảo bị chết/lỗi (stopped) của các Job PENDING
-    if pending_jobs and instances:
-        needs_reload = False
-        for job in pending_jobs:
-            contract_id = job.get("vast_contract_id")
-            if contract_id:
-                inst = instance_states.get(str(contract_id))
-                if inst:
-                    status = inst.get("actual_status", "")
-                    state = inst.get("cur_state", "")
-                    # Nếu máy ảo của job PENDING đã bị dừng/thoát do lỗi container
-                    if status == "stopped" or state == "stopped":
-                        print(f"[Provisioner] [TỰ SỬA LỖI] Máy ảo {contract_id} của Job {job['id']} đã dừng/lỗi. Tiến hành hủy máy và reset DB.")
-                        destroy_instance(inst["id"])
-                        try:
-                            conn = get_db_connection()
-                            cursor = conn.cursor()
-                            cursor.execute("UPDATE jobs SET vast_contract_id = NULL, updated_at = ? WHERE id = ?", (datetime.now().isoformat(), job["id"]))
-                            conn.commit()
-                            conn.close()
-                            needs_reload = True
-                        except Exception as db_err:
-                            print(f"[Provisioner] Lỗi DB khi reset job: {db_err}")
-        if needs_reload:
-            pending_jobs = get_pending_jobs()
-            pending_count = len(pending_jobs)
+    # 2. Tự động phát hiện và xử lý sớm các máy ảo bị chết/lỗi (stopped) hoặc bị thu hồi của các Job PENDING và PROCESSING
+    needs_reload = False
+    
+    # Danh sách các job cần kiểm tra (tất cả job PENDING và PROCESSING có gán contract_id)
+    jobs_to_check = []
+    for job in pending_jobs:
+        if job.get("vast_contract_id"):
+            jobs_to_check.append(job)
+    for job in get_processing_jobs():
+        if job.get("vast_contract_id"):
+            jobs_to_check.append(job)
+            
+    for job in jobs_to_check:
+        contract_id = job.get("vast_contract_id")
+        inst = instance_states.get(str(contract_id)) if instance_states else None
+        
+        # Nếu máy ảo tồn tại trên Vast.ai
+        if inst:
+            status = inst.get("actual_status", "")
+            state = inst.get("cur_state", "")
+            # Nếu máy ảo bị dừng (stopped) do lỗi container hoặc do worker kết thúc chương trình
+            if status == "stopped" or state == "stopped":
+                print(f"[Provisioner] [TỰ SỬA LỖI] Máy ảo {contract_id} của Job {job['id']} ({job['status']}) đã dừng/lỗi. Tiến hành hủy máy.")
+                destroy_instance(inst["id"])
+                try:
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    if job["status"] == "PENDING":
+                        # Đối với Job PENDING, reset vast_contract_id = NULL để thuê lại máy khác
+                        cursor.execute("UPDATE jobs SET vast_contract_id = NULL, updated_at = ? WHERE id = ?", (datetime.now().isoformat(), job["id"]))
+                    else:
+                        # Đối với Job PROCESSING, đánh dấu FAILED vì worker đã chạy sập/exit
+                        cursor.execute("UPDATE jobs SET status = ?, vast_contract_id = NULL, updated_at = ? WHERE id = ?", 
+                                       (f"FAILED: Máy ảo tự dừng đột ngột (Status: {status})", datetime.now().isoformat(), job["id"]))
+                    conn.commit()
+                    conn.close()
+                    needs_reload = True
+                except Exception as db_err:
+                    print(f"[Provisioner] Lỗi DB khi xử lý dừng máy ảo: {db_err}")
+        
+        # Nếu máy ảo đã bị xóa hoàn toàn khỏi tài khoản Vast.ai (bị thu hồi)
+        elif instances: # Chỉ xử lý nếu API get_vast_instances() thành công trả về danh sách thực tế (tránh trường hợp gọi API lỗi trả về rỗng làm xóa nhầm)
+            print(f"[Provisioner] [TỰ SỬA LỖI] Máy ảo {contract_id} của Job {job['id']} ({job['status']}) không còn tồn tại trên Vast.ai (bị thu hồi).")
+            try:
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                if job["status"] == "PENDING":
+                    cursor.execute("UPDATE jobs SET vast_contract_id = NULL, updated_at = ? WHERE id = ?", (datetime.now().isoformat(), job["id"]))
+                else:
+                    cursor.execute("UPDATE jobs SET status = 'FAILED: Máy ảo bị thu hồi hoặc xóa khỏi Vast.ai', vast_contract_id = NULL, updated_at = ? WHERE id = ?", 
+                                   (datetime.now().isoformat(), job["id"]))
+                conn.commit()
+                conn.close()
+                needs_reload = True
+            except Exception as db_err:
+                print(f"[Provisioner] Lỗi DB khi xử lý máy ảo bị thu hồi: {db_err}")
+                
+    if needs_reload:
+        pending_jobs = get_pending_jobs()
+        pending_count = len(pending_jobs)
 
     # 3. Thu thập các contract_id đang bận xử lý (PROCESSING) hoặc được gán cho job pending
     busy_contracts = set()

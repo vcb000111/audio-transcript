@@ -31,16 +31,19 @@ def download_audio(job_id, dest_path):
             f.write(chunk)
     print(f"[Worker] Tải file audio thành công: {dest_path}")
 
-def send_callback(job_id, callback_token, srt_content):
+def send_callback(job_id, callback_token, srt_content=None, error=None):
     url = f"{HUB_URL}/api/jobs/{job_id}/callback"
     headers = {
         "Content-Type": "application/json",
         "X-Callback-Token": callback_token
     }
-    payload = {
-        "srt_content": srt_content
-    }
-    print(f"[Worker] Gửi callback trả phụ đề cho Job {job_id}...")
+    payload = {}
+    if srt_content is not None:
+        payload["srt_content"] = srt_content
+    if error is not None:
+        payload["error"] = error
+        
+    print(f"[Worker] Gửi callback kết quả cho Job {job_id}...")
     res = requests.post(url, json=payload, headers=headers, timeout=30)
     if res.status_code == 200:
         print(f"[Worker] Callback thành công cho Job {job_id}.")
@@ -83,11 +86,15 @@ def process_job(job):
             srt_content = f.read()
             
         # Bước 4: Gửi trả phụ đề về Hub
-        send_callback(job_id, callback_token, srt_content)
+        send_callback(job_id, callback_token, srt_content=srt_content)
         
     except Exception as e:
         print(f"[Worker] Lỗi nghiêm trọng khi xử lý Job {job_id}: {e}")
-        # Báo cáo lỗi nếu cần (hoặc Hub tự phát hiện qua Timeout)
+        # Báo cáo lỗi trực tiếp về Hub để Hub cập nhật trạng thái và hủy máy ảo ngay lập tức
+        try:
+            send_callback(job_id, callback_token, error=str(e))
+        except Exception as cb_err:
+            print(f"[Worker] Không thể gửi callback báo lỗi về Hub: {cb_err}")
     finally:
         # Dọn dẹp file tạm
         for temp_file in (temp_audio, temp_json, temp_srt):

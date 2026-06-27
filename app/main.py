@@ -144,7 +144,7 @@ async def worker_callback(
     x_callback_token: str = Header(None, alias="X-Callback-Token")
 ):
     """
-    Worker gọi API này gửi lại file phụ đề SRT sau khi dịch xong.
+    Worker gọi API này gửi lại file phụ đề SRT sau khi dịch xong hoặc báo lỗi.
     """
     job = get_job(job_id)
     if not job:
@@ -154,9 +154,21 @@ async def worker_callback(
     if job["callback_token"] != x_callback_token:
         raise HTTPException(status_code=403, detail="Xác thực token thất bại.")
         
+    error_msg = payload.get("error")
+    if error_msg:
+        # Ghi nhận lỗi từ Worker
+        update_job_status(job_id, f"FAILED: {error_msg}")
+        # Xóa file video gốc để giải phóng dung lượng Hub
+        if job.get("video_path") and os.path.exists(job["video_path"]):
+            try:
+                os.remove(job["video_path"])
+            except Exception as e:
+                print(f"Không thể xóa video gốc {job['video_path']}: {e}")
+        return {"status": "success", "message": "Đã ghi nhận lỗi của Job."}
+
     srt_content = payload.get("srt_content")
     if not srt_content:
-        raise HTTPException(status_code=400, detail="Thiếu nội dung phụ đề srt_content.")
+        raise HTTPException(status_code=400, detail="Thiếu nội dung phụ đề srt_content hoặc thông tin error.")
         
     # Ghi file phụ đề vật lý
     srt_path = os.path.join(SRT_DIR, f"{job_id}.srt")
