@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir \
     torchaudio==2.1.2 \
     torchvision==0.16.2 \
     faster-whisper \
-    transformers \
+    transformers==4.40.2 \
     bitsandbytes \
     accelerate \
     requests \
