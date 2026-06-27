@@ -22,7 +22,7 @@ def cache():
     # Tải cache model Whisper qua HuggingFace Hub snapshot (nặng ~3GB)
     download_with_retry(repo_id="Systran/faster-whisper-large-v3")
     
-    model_name = "Qwen/Qwen3.5-9B-Instruct"
+    model_name = "Qwen/Qwen3.5-9B"
     print(f"[Cache] Đang tải tokenizer cho {model_name}...")
     
     # Tải trước tokenizer với cơ chế thử lại

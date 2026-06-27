@@ -143,7 +143,7 @@ def main():
         bnb_4bit_compute_dtype=torch.float16
     )
 
-    model_name = "Qwen/Qwen3.5-9B-Instruct"
+    model_name = "Qwen/Qwen3.5-9B"
     print(f"[LLM] Đang tải tokenizer và model: {model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
