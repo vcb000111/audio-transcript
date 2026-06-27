@@ -25,3 +25,5 @@ Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận
 - Tối ưu hóa điều kiện lựa chọn máy ảo: chỉ thuê từ các máy chủ uy tín, độ tin cậy trên 95% và tốc độ truyền tải cao.
 - Bổ sung cơ chế tự động gửi báo cáo lỗi (error callback) từ Worker ngược về Central Hub khi gặp sự cố, tránh kẹt trạng thái xử lý.
 - Tự động phát hiện và dọn dẹp (hủy máy, chuyển trạng thái FAILED) các máy ảo bị dừng (`stopped`) hoặc bị thu hồi khi job đang xử lý (`PROCESSING`).
+- Hạ phiên bản thư viện `transformers` xuống `4.40.2` trong cấu hình Dockerfile của Worker để đảm bảo tương thích hoàn toàn với PyTorch 2.1.2, sửa triệt để lỗi sập Qwen (`NameError: name 'torch' is not defined`).
+
