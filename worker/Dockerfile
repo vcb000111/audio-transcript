@@ -16,13 +16,13 @@ RUN pip install --no-cache-dir \
     torch==2.1.2 \
     torchaudio==2.1.2 \
     torchvision==0.16.2 \
-    faster-whisper \
+    faster-whisper==1.2.1 \
     transformers==4.40.2 \
-    bitsandbytes \
-    accelerate \
-    requests \
-    huggingface_hub \
-    hf-transfer \
+    bitsandbytes==0.42.0 \
+    accelerate==0.29.3 \
+    requests==2.31.0 \
+    huggingface_hub==0.23.0 \
+    hf-transfer==0.1.6 \
     --extra-index-url https://download.pytorch.org/whl/cu121
 
 # Bật hf-transfer để tăng tốc download model trong quá trình build Docker
