@@ -32,7 +32,7 @@ ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 # Cài đặt llama-cpp-python hỗ trợ tăng tốc GPU CUDA
 ENV FORCE_CMAKE=1
-ENV CMAKE_ARGS="-DGGML_CUDA=on"
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=80;86;89"
 RUN pip install llama-cpp-python --no-cache-dir
 
 # Copy file cache và tải trước các model weights về cache của image
