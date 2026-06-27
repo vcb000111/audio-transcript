@@ -83,8 +83,9 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
                 **model_inputs,
                 max_new_tokens=256,
                 do_sample=True,
-                temperature=0.1 if attempt == retries - 1 else 0.3,
-                top_p=0.9
+                temperature=0.5 if attempt == retries - 1 else 0.7,
+                top_p=0.8,
+                top_k=20
             )
             generated_ids = [
                 output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
@@ -115,7 +116,7 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
         ]
         text_in_min = tokenizer.apply_chat_template(minimal_messages, tokenize=False, add_generation_prompt=True)
         inputs_min = tokenizer([text_in_min], return_tensors="pt").to(model.device)
-        gen_ids_min = model.generate(**inputs_min, max_new_tokens=256, temperature=0.1, do_sample=True)
+        gen_ids_min = model.generate(**inputs_min, max_new_tokens=256, temperature=0.7, top_p=0.8, top_k=20, do_sample=True)
         gen_ids_min = [o[len(i):] for i, o in zip(inputs_min.input_ids, gen_ids_min)]
         response_min = tokenizer.batch_decode(gen_ids_min, skip_special_tokens=True)[0].strip()
         response_min = re.sub(r"<think>.*?</think>", "", response_min, flags=re.DOTALL).strip()
@@ -129,7 +130,7 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
     return text  # Fallback cuối cùng trả về câu gốc
 
 def main():
-    parser = argparse.ArgumentParser(description="Translate Japanese text to Vietnamese using Qwen 2.5 14B Uncensored")
+    parser = argparse.ArgumentParser(description="Translate Japanese text to Vietnamese using Qwen 3.5 9B")
     parser.add_argument("--input", required=True, help="Đường dẫn file JSON bóc băng tạm")
     parser.add_argument("--output", required=True, help="Đường dẫn file SRT đầu ra")
     args = parser.parse_args()
@@ -142,7 +143,7 @@ def main():
         bnb_4bit_compute_dtype=torch.float16
     )
 
-    model_name = "cognitivecomputations/qwen2.5-14b-instruct-uncensored"
+    model_name = "Qwen/Qwen3.5-9B-Instruct"
     print(f"[LLM] Đang tải tokenizer và model: {model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
