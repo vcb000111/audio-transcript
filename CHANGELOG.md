@@ -23,3 +23,5 @@ Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận
 - Sửa lỗi không tải được tệp tin video kiểm thử do định dạng tệp tin giả lập bị lỗi bằng cách tự động sinh tệp tin âm thanh im lặng chuẩn.
 - Tạo công cụ dọn dẹp nhanh hàng đợi công việc bị kẹt trong cơ sở dữ liệu.
 - Tối ưu hóa điều kiện lựa chọn máy ảo: chỉ thuê từ các máy chủ uy tín, độ tin cậy trên 95% và tốc độ truyền tải cao.
+- Bổ sung cơ chế tự động gửi báo cáo lỗi (error callback) từ Worker ngược về Central Hub khi gặp sự cố, tránh kẹt trạng thái xử lý.
+- Tự động phát hiện và dọn dẹp (hủy máy, chuyển trạng thái FAILED) các máy ảo bị dừng (`stopped`) hoặc bị thu hồi khi job đang xử lý (`PROCESSING`).

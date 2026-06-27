@@ -39,31 +39,43 @@ def save_instance_log(instance_id: int):
     if not VAST_API_KEY:
         return
     try:
-        url = f"{VAST_API_URL_V0}/instances/{instance_id}/log/?api_key={VAST_API_KEY}"
-        print(f"[Provisioner] Đang tải log của máy ảo {instance_id} trước khi hủy...")
-        # Lấy log qua phương thức POST (theo tiêu chuẩn CLI của Vast.ai)
-        res = requests.post(url, json={}, headers=get_headers(), timeout=15)
-        log_data = ""
+        # 1. Gọi PUT để yêu cầu tạo log từ Vast.ai
+        url = f"{VAST_API_URL_V0}/instances/request_logs/{instance_id}/?api_key={VAST_API_KEY}"
+        print(f"[Provisioner] Yêu cầu Vast.ai tạo log cho máy ảo {instance_id}: PUT {url}")
+        res = requests.put(url, json={}, headers=get_headers(), timeout=15)
+        
         if res.status_code == 200:
-            log_data = res.json().get("log", "")
-            
-        # Thử lại với GET nếu POST không trả về dữ liệu log
-        if not log_data:
-            res_get = requests.get(url, headers=get_headers(), timeout=15)
-            if res_get.status_code == 200:
-                log_data = res_get.json().get("log", "")
+            result_url = res.json().get("result_url")
+            if result_url:
+                # 2. Polling kết quả result_url để lấy log text
+                print(f"[Provisioner] Đang tải log từ CDN: {result_url}")
+                log_data = ""
+                for _ in range(20): # thử tối đa 20 lần (khoảng 6 giây)
+                    time.sleep(0.3)
+                    try:
+                        r_log = requests.get(result_url, timeout=10)
+                        if r_log.status_code == 200:
+                            log_data = r_log.text
+                            break
+                    except Exception as poll_err:
+                        # Bỏ qua lỗi kết nối trong khi poll
+                        pass
                 
-        if log_data:
-            log_dir = os.path.join(os.getenv("STORAGE_DIR", "./storage"), "logs")
-            os.makedirs(log_dir, exist_ok=True)
-            log_file = os.path.join(log_dir, f"{instance_id}.log")
-            with open(log_file, "w", encoding="utf-8") as f:
-                f.write(log_data)
-            print(f"[Provisioner] Đã lưu log máy ảo {instance_id} vào file: {log_file}")
+                if log_data:
+                    log_dir = os.path.join(os.getenv("STORAGE_DIR", "./storage"), "logs")
+                    os.makedirs(log_dir, exist_ok=True)
+                    log_file = os.path.join(log_dir, f"{instance_id}.log")
+                    with open(log_file, "w", encoding="utf-8") as f:
+                        f.write(log_data)
+                    print(f"[Provisioner] Đã lưu log máy ảo {instance_id} vào file: {log_file}")
+                else:
+                    print(f"[Provisioner] Không tải được nội dung log từ URL cho máy {instance_id} (Timeout).")
+            else:
+                print(f"[Provisioner] Vast.ai không trả về result_url cho log máy {instance_id}.")
         else:
-            print(f"[Provisioner] API không trả về nội dung log cho máy {instance_id}.")
+            print(f"[Provisioner] Lỗi yêu cầu log máy {instance_id}: Status {res.status_code} - {res.text}")
     except Exception as e:
-        print(f"[Provisioner] Lỗi kết nối khi tải log máy {instance_id}: {e}")
+        print(f"[Provisioner] Lỗi hệ thống khi tải log máy {instance_id}: {e}")
 
 def get_headers():
     return {
