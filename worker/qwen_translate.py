@@ -2,7 +2,7 @@ import argparse
 import json
 import torch
 import re
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+import os
 
 # Định dạng thời gian SRT (HH:MM:SS,mmm)
 def format_srt_time(seconds: float) -> str:
@@ -49,6 +49,15 @@ def detect_speaker_info(text: str) -> str:
     return "VAI VẾ NHÂN VẬT: Cuộc trò chuyện thân mật trong gia đình giữa hai anh em. Hãy dịch xưng hô tự nhiên là 'Anh' - 'Em'."
 
 def translate_single_text(model, tokenizer, text, history_context=[], retries=2):
+    # Xác định loại động cơ dịch dựa trên instance của model
+    is_llamacpp = False
+    try:
+        from llama_cpp import Llama
+        if isinstance(model, Llama):
+            is_llamacpp = True
+    except ImportError:
+        pass
+
     speaker_hint = detect_speaker_info(text)
     system_prompt = (
         "Bạn là một biên dịch viên phụ đề phim gia đình/tình cảm Nhật Bản sang tiếng Việt chuyên nghiệp.\n"
@@ -74,24 +83,34 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
         {"role": "user", "content": prompt}
     ]
     
-    text_in = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    model_inputs = tokenizer([text_in], return_tensors="pt").to(model.device)
-    
+    # 1. Thử dịch với ngữ cảnh trượt
     for attempt in range(retries):
         try:
-            generated_ids = model.generate(
-                **model_inputs,
-                max_new_tokens=256,
-                do_sample=True,
-                temperature=0.5 if attempt == retries - 1 else 0.7,
-                top_p=0.8,
-                top_k=20
-            )
-            generated_ids = [
-                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
-            ]
-            response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
-            
+            if is_llamacpp:
+                response_data = model.create_chat_completion(
+                    messages=messages,
+                    max_tokens=256,
+                    temperature=0.5 if attempt == retries - 1 else 0.7,
+                    top_p=0.8,
+                    top_k=20
+                )
+                response = response_data["choices"][0]["message"]["content"].strip()
+            else:
+                text_in = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                model_inputs = tokenizer([text_in], return_tensors="pt").to(model.device)
+                generated_ids = model.generate(
+                    **model_inputs,
+                    max_new_tokens=256,
+                    do_sample=True,
+                    temperature=0.5 if attempt == retries - 1 else 0.7,
+                    top_p=0.8,
+                    top_k=20
+                )
+                generated_ids = [
+                    output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+                ]
+                response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+                
             # Loại bỏ thẻ think nếu có
             response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
             # Làm sạch phản hồi
@@ -107,18 +126,28 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
         except Exception as e:
             print(f"[LLM] Lỗi khi dịch câu '{text}' ở lần thử {attempt+1}: {e}")
             
-    # Fallback nếu bị từ chối dịch hoặc lỗi sau tất cả lần thử:
-    # Dùng minimalist prompt để vượt qua bộ lọc an toàn của Qwen
+    # 2. Fallback tối giản (Minimalist Fallback) nếu gặp sự cố/kiểm duyệt
     print(f"[LLM] Kích hoạt chế độ dịch tối giản (Minimalist Prompt) cho câu nhạy cảm: '{text}'")
     try:
         minimal_messages = [
             {"role": "user", "content": f"Dịch câu thoại này sang tiếng Việt: {text}"}
         ]
-        text_in_min = tokenizer.apply_chat_template(minimal_messages, tokenize=False, add_generation_prompt=True)
-        inputs_min = tokenizer([text_in_min], return_tensors="pt").to(model.device)
-        gen_ids_min = model.generate(**inputs_min, max_new_tokens=256, temperature=0.7, top_p=0.8, top_k=20, do_sample=True)
-        gen_ids_min = [o[len(i):] for i, o in zip(inputs_min.input_ids, gen_ids_min)]
-        response_min = tokenizer.batch_decode(gen_ids_min, skip_special_tokens=True)[0].strip()
+        if is_llamacpp:
+            response_data = model.create_chat_completion(
+                messages=minimal_messages,
+                max_tokens=256,
+                temperature=0.7,
+                top_p=0.8,
+                top_k=20
+            )
+            response_min = response_data["choices"][0]["message"]["content"].strip()
+        else:
+            text_in_min = tokenizer.apply_chat_template(minimal_messages, tokenize=False, add_generation_prompt=True)
+            inputs_min = tokenizer([text_in_min], return_tensors="pt").to(model.device)
+            gen_ids_min = model.generate(**inputs_min, max_new_tokens=256, temperature=0.7, top_p=0.8, top_k=20, do_sample=True)
+            gen_ids_min = [o[len(i):] for i, o in zip(inputs_min.input_ids, gen_ids_min)]
+            response_min = tokenizer.batch_decode(gen_ids_min, skip_special_tokens=True)[0].strip()
+            
         response_min = re.sub(r"<think>.*?</think>", "", response_min, flags=re.DOTALL).strip()
         response_min = response_min.strip('"\'')
         is_refusal_min = any(k in response_min for k in ["không thể", "yêu cầu", "phù hợp", "từ chối"])
@@ -130,27 +159,53 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
     return text  # Fallback cuối cùng trả về câu gốc
 
 def main():
-    parser = argparse.ArgumentParser(description="Translate Japanese text to Vietnamese using Qwen 3.5 9B")
+    parser = argparse.ArgumentParser(description="Translate Japanese text to Vietnamese using Qwen Hybrid Engine")
     parser.add_argument("--input", required=True, help="Đường dẫn file JSON bóc băng tạm")
     parser.add_argument("--output", required=True, help="Đường dẫn file SRT đầu ra")
     args = parser.parse_args()
 
-    print("[LLM] Đang cấu hình BitsAndBytes 4-bit...")
-    bnb_config = BitsAndBytesConfig(
-        load_in_4bit=True,
-        bnb_4bit_use_double_quant=True,
-        bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16
-    )
+    engine = os.getenv("TRANSLATION_ENGINE", "llamacpp").lower()
+    print(f"[LLM] Khởi chạy dịch thuật với động cơ: {engine.upper()}")
 
-    model_name = "Qwen/Qwen3.5-9B"
-    print(f"[LLM] Đang tải tokenizer và model: {model_name}...")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        quantization_config=bnb_config,
-        device_map="auto"
-    )
+    model = None
+    tokenizer = None
+
+    if engine == "llamacpp":
+        from llama_cpp import Llama
+        from huggingface_hub import hf_hub_download
+        
+        repo_id = os.getenv("HF_MODEL_REPO", "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive")
+        filename = os.getenv("GGUF_FILE_NAME", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf")
+        
+        print(f"[LLM] Đang định vị file GGUF trong cache: {filename} từ {repo_id}...")
+        model_path = hf_hub_download(repo_id=repo_id, filename=filename)
+        print(f"[LLM] Đang tải model GGUF lên GPU: {model_path}...")
+        
+        model = Llama(
+            model_path=model_path,
+            n_ctx=4096,
+            n_gpu_layers=-1  # Nạp toàn bộ model weights lên GPU VRAM
+        )
+    else:
+        # Fallback sử dụng Transformers
+        from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+        
+        model_name = os.getenv("HF_MODEL_REPO", "Qwen/Qwen3.5-9B")
+        print(f"[LLM] Đang cấu hình BitsAndBytes 4-bit cho Transformers...")
+        bnb_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_compute_dtype=torch.float16
+        )
+        
+        print(f"[LLM] Đang tải tokenizer và model qua Transformers: {model_name}...")
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        model = AutoModelForCausalLM.from_pretrained(
+            model_name,
+            quantization_config=bnb_config,
+            device_map="auto"
+        )
 
     with open(args.input, "r", encoding="utf-8") as f:
         segments = json.load(f)

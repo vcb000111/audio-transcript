@@ -184,7 +184,12 @@ def rent_new_gpu() -> str:
         payload = {
             "client_id": "me",
             "image": image_name,
-            "env": {"HUB_URL": HUB_PUBLIC_URL},
+            "env": {
+                "HUB_URL": HUB_PUBLIC_URL,
+                "TRANSLATION_ENGINE": os.getenv("TRANSLATION_ENGINE", "llamacpp"),
+                "HF_MODEL_REPO": os.getenv("HF_MODEL_REPO", "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive"),
+                "GGUF_FILE_NAME": os.getenv("GGUF_FILE_NAME", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf")
+            },
             "disk": 40.0, # 40GB đủ cho CUDA runtime + cache models không bị tràn overlayfs
             "runtype": "args"
         }
