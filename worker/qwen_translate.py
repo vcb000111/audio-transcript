@@ -15,34 +15,34 @@ def format_srt_time(seconds: float) -> str:
         millis = 0
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
-def translate_batch_with_retry(model, tokenizer, batch_texts, retries=3):
+def translate_single_text(model, tokenizer, text, history_context=[], retries=2):
     system_prompt = (
-        "You are a professional JAV subtitle translator. Translate Japanese to Vietnamese smoothly, "
-        "retaining JAV adult slang, terms, and context naturally. "
-        "Input is a JSON array of Japanese lines. Output MUST be a JSON array of Vietnamese translated lines of the exact same length. "
-        "Output ONLY a valid JSON array of strings (e.g. [\"Xin chào\", \"Tạm biệt\"]). "
-        "No explanations, no markdown codeblocks, no extra text."
+        "Bạn là một dịch giả phụ đề JAV chuyên nghiệp. Hãy dịch câu thoại tiếng Nhật sau sang tiếng Việt một cách tự nhiên, trôi chảy.\n"
+        "Lưu ý giữ đúng ngữ cảnh người lớn, từ lóng JAV tự nhiên, xưng hô phù hợp (anh - em, em - anh, tôi - cô,...).\n"
+        "Chỉ trả về bản dịch tiếng Việt duy nhất. Tuyệt đối không giải thích, không viết ghi chú, không markdown, không lặp lại câu gốc."
     )
     
-    prompt = json.dumps(batch_texts, ensure_ascii=False)
+    context_str = ""
+    if history_context:
+        context_str = "Các câu thoại và bản dịch trước đó để tham khảo ngữ cảnh:\n" + "\n".join(history_context) + "\n\n"
+        
+    prompt = f"{context_str}Hãy dịch câu thoại tiếng Nhật này: {text}"
+    
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "user", "content": prompt}
     ]
     
-    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-    model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+    text_in = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    model_inputs = tokenizer([text_in], return_tensors="pt").to(model.device)
     
     for attempt in range(retries):
         try:
-            # Dùng nhiệt độ thấp hơn khi thử lại để tăng độ ổn định
-            temp = 0.1 if attempt == retries - 1 else 0.4
-            
             generated_ids = model.generate(
                 **model_inputs,
-                max_new_tokens=2048,
+                max_new_tokens=256,
                 do_sample=True,
-                temperature=temp,
+                temperature=0.1 if attempt == retries - 1 else 0.3,
                 top_p=0.9
             )
             generated_ids = [
@@ -50,22 +50,14 @@ def translate_batch_with_retry(model, tokenizer, batch_texts, retries=3):
             ]
             response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
             
-            # Trích xuất JSON từ phản hồi (đề phòng mô hình bọc trong ```json)
-            json_match = re.search(r"(\[.*\])", response, re.DOTALL)
-            if json_match:
-                response = json_match.group(1)
-                
-            translated_list = json.loads(response)
-            
-            if isinstance(translated_list, list) and len(translated_list) == len(batch_texts):
-                return translated_list
-            else:
-                print(f"[LLM] Cảnh báo thử lại lần {attempt+1}: Độ dài kết quả dịch ({len(translated_list)}) khác đầu vào ({len(batch_texts)}).")
+            # Làm sạch phản hồi
+            response = response.strip('"\'')
+            if response and response != text:
+                return response
         except Exception as e:
-            print(f"[LLM] Lỗi parse JSON tại lần thử {attempt+1}: {e}")
+            print(f"[LLM] Lỗi khi dịch câu '{text}' ở lần thử {attempt+1}: {e}")
             
-    print("[LLM] Thất bại khi dịch lô này sau tất cả các lần thử. Fallback giữ nguyên bản tiếng Nhật.")
-    return batch_texts
+    return text  # Fallback trả về câu gốc nếu thất bại
 
 def main():
     parser = argparse.ArgumentParser(description="Translate Japanese text to Vietnamese using Qwen 2.5 7B")
@@ -99,19 +91,23 @@ def main():
             f.write("")
         return
 
-    print(f"[LLM] Bắt đầu dịch {len(segments)} câu thoại theo lô (Batch size = 25)...")
-    
-    # Chia lô 25 câu
-    batch_size = 25
+    print(f"[LLM] Bắt đầu dịch {len(segments)} câu thoại từng câu một với ngữ cảnh trượt...")
     translated_texts = []
     
-    for i in range(0, len(segments), batch_size):
-        batch = segments[i:i+batch_size]
-        batch_texts = [seg["text"] for seg in batch]
-        
-        print(f"[LLM] Dịch từ câu {i+1} đến {min(i+batch_size, len(segments))}...")
-        translated_batch = translate_batch_with_retry(model, tokenizer, batch_texts)
-        translated_texts.extend(translated_batch)
+    for idx, seg in enumerate(segments):
+        text = seg["text"]
+        # Lấy tối đa 3 câu dịch gần nhất làm ngữ cảnh
+        history = []
+        start_idx = max(0, idx - 3)
+        for h_idx in range(start_idx, idx):
+            orig = segments[h_idx]["text"]
+            trans = translated_texts[h_idx]
+            history.append(f"Gốc: {orig} -> Dịch: {trans}")
+            
+        print(f"[LLM] ({idx+1}/{len(segments)}) Dịch: {text}")
+        translated_text = translate_single_text(model, tokenizer, text, history)
+        translated_texts.append(translated_text)
+        print(f"      -> Kết quả: {translated_text}")
 
     # Ghi file SRT
     print(f"[LLM] Ghi kết quả dịch ra file SRT: {args.output}")
@@ -121,8 +117,7 @@ def main():
             start_str = format_srt_time(seg["start"])
             end_str = format_srt_time(seg["end"])
             
-            # Đề phòng lỗi thiếu hụt dòng dịch
-            vn_text = translated_texts[idx] if idx < len(translated_texts) else seg["text"]
+            vn_text = translated_texts[idx]
             
             f.write(f"{srt_idx}\n")
             f.write(f"{start_str} --> {end_str}\n")
@@ -132,3 +127,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+```
