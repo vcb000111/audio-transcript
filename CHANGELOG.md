@@ -26,4 +26,5 @@ Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận
 - Bổ sung cơ chế tự động gửi báo cáo lỗi (error callback) từ Worker ngược về Central Hub khi gặp sự cố, tránh kẹt trạng thái xử lý.
 - Tự động phát hiện và dọn dẹp (hủy máy, chuyển trạng thái FAILED) các máy ảo bị dừng (`stopped`) hoặc bị thu hồi khi job đang xử lý (`PROCESSING`).
 - Hạ phiên bản thư viện `transformers` xuống `4.40.2` trong cấu hình Dockerfile của Worker để đảm bảo tương thích hoàn toàn với PyTorch 2.1.2, sửa triệt để lỗi sập Qwen (`NameError: name 'torch' is not defined`).
+- Thực hiện khóa cứng (pin) toàn bộ các phiên bản thư viện Python của Worker (`faster-whisper==1.2.1`, `bitsandbytes==0.42.0`, `accelerate==0.29.3`, `requests==2.31.0`, `huggingface_hub==0.23.0`, `hf-transfer==0.1.6`) để triệt tiêu mọi rủi ro không tương thích phiên bản (dependency drift) trong tương lai.
 
