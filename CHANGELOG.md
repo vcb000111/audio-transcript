@@ -29,4 +29,6 @@ Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận
 - Thực hiện khóa cứng (pin) toàn bộ các phiên bản thư viện Python của Worker (`faster-whisper==1.2.1`, `bitsandbytes==0.42.0`, `accelerate==0.29.3`, `requests==2.31.0`, `huggingface_hub==0.23.0`, `hf-transfer==0.1.6`) để triệt tiêu mọi rủi ro không tương thích phiên bản (dependency drift) trong tương lai.
 - Thiết kế lại cơ chế dịch thuật Qwen 2.5: chuyển từ dịch theo lô (batch 25 câu) sang dịch từng câu thoại một kết hợp với ngữ cảnh trượt (sliding window 3 câu dịch trước đó). Thay đổi này giúp loại bỏ hoàn toàn tình trạng lệch dòng, mất câu, và lỗi parse mảng JSON của mô hình LLM, đảm bảo dịch hết 100% tiếng Nhật sang tiếng Việt chuẩn ngữ cảnh JAV.
 - Khắc phục lỗi cú pháp `SyntaxError: invalid syntax` thừa ký tự markdown ở cuối file `qwen_translate.py` trong bản build trước.
+- Nâng cấp thuật toán dịch thuật trong `qwen_translate.py`: Tích hợp bộ lọc regex phát hiện và ngăn chặn lây nhiễm ngôn ngữ ngoại lai (chữ Hán, Thái, Hàn) trong chuỗi ngữ cảnh trượt (sliding window context).
+- Bổ sung quy tắc xưng hô tiếng Việt tự nhiên chuẩn văn phong gia đình/phụ đề JAV (Anh - Em thay vì dịch thô thô thiển như Anh bạn, Tôi, Tao, Mày), ép đầu ra chỉ trả về 100% tiếng Việt sạch sẽ.
 
