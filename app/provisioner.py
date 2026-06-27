@@ -34,6 +34,37 @@ def get_current_git_sha():
         print(f"[Provisioner] Bỏ qua lấy Git SHA do lỗi: {e}")
         return None
 
+def save_instance_log(instance_id: int):
+    """Tải log của instance từ Vast.ai và lưu lại ở Hub trước khi hủy máy ảo để sếp tiện debug"""
+    if not VAST_API_KEY:
+        return
+    try:
+        url = f"{VAST_API_URL_V0}/instances/{instance_id}/log/?api_key={VAST_API_KEY}"
+        print(f"[Provisioner] Đang tải log của máy ảo {instance_id} trước khi hủy...")
+        # Lấy log qua phương thức POST (theo tiêu chuẩn CLI của Vast.ai)
+        res = requests.post(url, json={}, headers=get_headers(), timeout=15)
+        log_data = ""
+        if res.status_code == 200:
+            log_data = res.json().get("log", "")
+            
+        # Thử lại với GET nếu POST không trả về dữ liệu log
+        if not log_data:
+            res_get = requests.get(url, headers=get_headers(), timeout=15)
+            if res_get.status_code == 200:
+                log_data = res_get.json().get("log", "")
+                
+        if log_data:
+            log_dir = os.path.join(os.getenv("STORAGE_DIR", "./storage"), "logs")
+            os.makedirs(log_dir, exist_ok=True)
+            log_file = os.path.join(log_dir, f"{instance_id}.log")
+            with open(log_file, "w", encoding="utf-8") as f:
+                f.write(log_data)
+            print(f"[Provisioner] Đã lưu log máy ảo {instance_id} vào file: {log_file}")
+        else:
+            print(f"[Provisioner] API không trả về nội dung log cho máy {instance_id}.")
+    except Exception as e:
+        print(f"[Provisioner] Lỗi kết nối khi tải log máy {instance_id}: {e}")
+
 def get_headers():
     return {
         "Accept": "application/json",
@@ -186,6 +217,7 @@ def handle_timeouts():
                 
                 # Ra lệnh hủy máy bị kẹt
                 try:
+                    save_instance_log(int(stuck_instance_id))
                     destroy_instance(int(stuck_instance_id))
                 except Exception as dest_err:
                     print(f"[Provisioner] Không thể tự động hủy máy kẹt {stuck_instance_id}: {dest_err}")
@@ -230,6 +262,7 @@ def run_provisioner_cycle():
             # Nếu máy ảo bị dừng (stopped) do lỗi container hoặc do worker kết thúc chương trình
             if status == "stopped" or state == "stopped":
                 print(f"[Provisioner] [TỰ SỬA LỖI] Máy ảo {contract_id} của Job {job['id']} ({job['status']}) đã dừng/lỗi. Tiến hành hủy máy.")
+                save_instance_log(inst["id"])
                 destroy_instance(inst["id"])
                 try:
                     conn = get_db_connection()
@@ -284,6 +317,7 @@ def run_provisioner_cycle():
             inst_id_str = str(inst["id"])
             if inst_id_str not in busy_contracts:
                 print(f"[Provisioner] [DỌN DẸP] Phát hiện máy ảo thừa {inst_id_str} (không liên kết với job nào). Tiến hành hủy ngay lập tức.")
+                save_instance_log(inst["id"])
                 destroy_instance(inst["id"])
             else:
                 cleaned_instances.append(inst)
