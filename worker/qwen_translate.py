@@ -20,16 +20,6 @@ def contains_foreign_script(text: str) -> bool:
     pattern = re.compile(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\u0e00-\u0e7f\uac00-\ud7a3]")
     return bool(pattern.search(text))
 
-def clean_translation_trash(text: str) -> str:
-    """Loại bỏ tag suy nghĩ <think>...</think>, tiền tố giải thích và dấu ngoặc kép thừa của LLM"""
-    # 1. Loại bỏ tag <think>...</think> nếu có
-    text = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE).strip()
-    # 2. Loại bỏ các tiền tố giải thích phổ biến
-    text = re.sub(r"^(dịch câu thoại sang tiếng việt là|bản dịch tiếng việt là|dịch là|bản dịch là|câu thoại này dịch là)[:\s]*", "", text, flags=re.IGNORECASE).strip()
-    # 3. Loại bỏ dấu ngoặc kép/đơn bọc ngoài
-    text = text.strip('"\'')
-    return text
-
 def detect_speaker_info(text: str) -> str:
     """Phân tích câu thoại tiếng Nhật để đoán vai vế người nói và hướng dẫn xưng hô"""
     # Em gái gọi anh trai
@@ -101,8 +91,10 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
             ]
             response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
             
-            # Làm sạch phản hồi bằng bộ lọc
-            response = clean_translation_trash(response)
+            # Loại bỏ thẻ think nếu có
+            response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+            # Làm sạch phản hồi
+            response = response.strip('"\'')
             
             # Kiểm tra xem bản dịch có chứa chữ nước ngoài hay câu từ chối dịch không
             is_refusal = any(k in response for k in ["không thể", "yêu cầu", "phù hợp", "từ chối", "đề xuất", "chính sách"])
@@ -126,7 +118,8 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
         gen_ids_min = model.generate(**inputs_min, max_new_tokens=256, temperature=0.1, do_sample=True)
         gen_ids_min = [o[len(i):] for i, o in zip(inputs_min.input_ids, gen_ids_min)]
         response_min = tokenizer.batch_decode(gen_ids_min, skip_special_tokens=True)[0].strip()
-        response_min = clean_translation_trash(response_min)
+        response_min = re.sub(r"<think>.*?</think>", "", response_min, flags=re.DOTALL).strip()
+        response_min = response_min.strip('"\'')
         is_refusal_min = any(k in response_min for k in ["không thể", "yêu cầu", "phù hợp", "từ chối"])
         if response_min and response_min != text and not contains_foreign_script(response_min) and not is_refusal_min:
             return response_min
@@ -136,7 +129,7 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
     return text  # Fallback cuối cùng trả về câu gốc
 
 def main():
-    parser = argparse.ArgumentParser(description="Translate Japanese text to Vietnamese using Qwen 2.5 7B")
+    parser = argparse.ArgumentParser(description="Translate Japanese text to Vietnamese using Qwen 2.5 14B Uncensored")
     parser.add_argument("--input", required=True, help="Đường dẫn file JSON bóc băng tạm")
     parser.add_argument("--output", required=True, help="Đường dẫn file SRT đầu ra")
     args = parser.parse_args()
@@ -149,7 +142,7 @@ def main():
         bnb_4bit_compute_dtype=torch.float16
     )
 
-    model_name = "Qwen/Qwen2.5-7B-Instruct"
+    model_name = "cognitivecomputations/qwen2.5-14b-instruct-uncensored"
     print(f"[LLM] Đang tải tokenizer và model: {model_name}...")
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
