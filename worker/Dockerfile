@@ -1,5 +1,11 @@
 FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-devel
 
+# Cấu hình biến môi trường NVIDIA và CUDA để container nhận dạng GPU khi chạy trên Vast.ai
+ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
+ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/lib64:/usr/local/cuda/targets/x86_64-linux/lib:${LD_LIBRARY_PATH}
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
 # Tránh hộp thoại cấu hình tzdata tương tác gây treo tiến trình build
 ENV DEBIAN_FRONTEND=noninteractive
 
