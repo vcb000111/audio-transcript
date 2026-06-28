@@ -137,6 +137,12 @@ def destroy_instance(instance_id: int):
         res = requests.delete(url, headers=get_headers(), timeout=15)
         if res.status_code == 200:
             print(f"[Provisioner] Đã ra lệnh Destroy máy GPU {instance_id} thành công.")
+            return True
+        else:
+            print(f"[Provisioner] Lỗi destroy máy GPU {instance_id}: Status {res.status_code} - Phản hồi: {res.text}")
+    except Exception as e:
+        print(f"[Provisioner] Lỗi kết nối khi destroy máy GPU {instance_id}: {e}")
+    return False
 def rent_new_gpu() -> str:
     """Tìm kiếm và thuê thêm 1 GPU RTX 4090 rẻ nhất có mạng >= 1 Gbps, trả về contract_id nếu thành công"""
     cfg = get_config()
