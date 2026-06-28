@@ -337,8 +337,8 @@ def main():
         from llama_cpp import Llama
         from huggingface_hub import hf_hub_download
         
-        repo_id = os.getenv("HF_MODEL_REPO", "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive")
-        filename = os.getenv("GGUF_FILE_NAME", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf")
+        repo_id = os.getenv("HF_MODEL_REPO", "bartowski/Qwen2.5-14B-Instruct-GGUF")
+        filename = os.getenv("GGUF_FILE_NAME", "Qwen2.5-14B-Instruct-Q8_0.gguf")
         
         print(f"[LLM] Đang định vị file GGUF trong cache: {filename} từ {repo_id}...")
         model_path = hf_hub_download(repo_id=repo_id, filename=filename)

@@ -2,6 +2,11 @@
 
 Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận tại đây.
 
+## [1.0.1] - 2026-06-28
+
+### 🛠️ Sửa lỗi
+- Khắc phục sự cố không tải được mô hình dịch thuật do tệp nguồn trên dịch vụ lưu trữ thay đổi cấu trúc cấu hình tải trước.
+
 ## [1.0.0] - 2026-06-26
 
 ### 🌐 Tính năng chính (Tier 1 & Tier 2)

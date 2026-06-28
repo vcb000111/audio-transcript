@@ -1,4 +1,5 @@
 import time
+import os
 from huggingface_hub import snapshot_download, hf_hub_download
 from transformers import AutoTokenizer
 
@@ -57,9 +58,9 @@ def cache():
     #     ignore_patterns=["*.msgpack", "*.h5", "*.ot"]
     # )
     
-    # 3. Tải file GGUF bản Uncensored Q8_0 phục vụ chạy động cơ LlamaCpp (nặng ~9.5GB)
-    gguf_repo = "Qwen/Qwen2.5-14B-Instruct-GGUF"
-    gguf_file = "qwen2_5-14b-instruct-q8_0.gguf"
+    # 3. Tải file GGUF bản Q8_0 phục vụ chạy động cơ LlamaCpp (nặng ~9.5GB)
+    gguf_repo = os.getenv("HF_MODEL_REPO", "bartowski/Qwen2.5-14B-Instruct-GGUF")
+    gguf_file = os.getenv("GGUF_FILE_NAME", "Qwen2.5-14B-Instruct-Q8_0.gguf")
     download_file_with_retry(repo_id=gguf_repo, filename=gguf_file)
     
     print("[Cache] Hoàn tất lưu cache toàn bộ model.")

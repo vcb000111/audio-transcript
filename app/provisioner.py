@@ -23,8 +23,8 @@ def get_config():
         "worker_image": os.getenv("WORKER_DOCKER_IMAGE", "minhtu98/vast-translator:latest").strip(),
         "use_latest": os.getenv("USE_LATEST_IMAGE", "false").lower() == "true",
         "engine": os.getenv("TRANSLATION_ENGINE", "llamacpp").strip(),
-        "model_repo": os.getenv("HF_MODEL_REPO", "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive").strip(),
-        "gguf_name": os.getenv("GGUF_FILE_NAME", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf").strip()
+        "model_repo": os.getenv("HF_MODEL_REPO", "bartowski/Qwen2.5-14B-Instruct-GGUF").strip(),
+        "gguf_name": os.getenv("GGUF_FILE_NAME", "Qwen2.5-14B-Instruct-Q8_0.gguf").strip()
     }
 
 VAST_API_URL_V0 = "https://console.vast.ai/api/v0"
