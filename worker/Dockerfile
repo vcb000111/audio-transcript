@@ -1,4 +1,4 @@
-FROM pytorch/pytorch:2.1.2-cuda12.1-cudnn8-devel
+FROM pytorch/pytorch:2.2.0-cuda12.1-cudnn8-devel
 
 # Cấu hình biến môi trường NVIDIA và CUDA để container nhận dạng GPU khi chạy trên Vast.ai
 ENV PATH=/usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
@@ -21,9 +21,9 @@ WORKDIR /app
 
 # Cài đặt các thư viện Python gộp chung để tránh pip tự động cài đè torchaudio/torchvision
 RUN pip install --no-cache-dir \
-    torch==2.1.2 \
-    torchaudio==2.1.2 \
-    torchvision==0.16.2 \
+    torch==2.2.0 \
+    torchaudio==2.2.0 \
+    torchvision==0.17.0 \
     faster-whisper==1.2.1 \
     transformers==4.40.2 \
     bitsandbytes==0.42.0 \
@@ -36,10 +36,8 @@ RUN pip install --no-cache-dir \
 # Bật hf-transfer để tăng tốc download model trong quá trình build Docker
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
-# Thiết lập biến môi trường biên dịch CUDA cho llama-cpp-python
-# Chỉ định cứng các kiến trúc CUDA (80;86;89) để build thành công trên GitHub runner không có GPU
-ENV CMAKE_ARGS="-DGGML_CUDA=on -DLLAMA_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=80;86;89"
-RUN pip install llama-cpp-python --force-reinstall --upgrade --no-cache-dir
+# Cài đặt llama-cpp-python hỗ trợ tăng tốc GPU CUDA bằng abetlen wheel (siêu nhanh nhờ glibc >= 2.35)
+RUN pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121 --no-cache-dir
 
 # Copy file cache và tải trước các model weights về cache của image
 COPY cache_models.py /app/
