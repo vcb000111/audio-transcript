@@ -13,12 +13,19 @@ from app.database import (
     get_pending_jobs, get_processing_jobs, update_job_status, get_db_connection
 )
 
-VAST_API_KEY = os.getenv("VAST_API_KEY", "")
-HUB_PUBLIC_URL = os.getenv("HUB_PUBLIC_URL", "http://localhost:8000")
-MAX_CONCURRENT_GPUS = int(os.getenv("MAX_CONCURRENT_GPUS", "100"))
-WORKER_DOCKER_IMAGE = os.getenv("WORKER_DOCKER_IMAGE", "docker.io/library/vast-translator:latest")
-
-print(f"[Provisioner] Khởi động với cấu hình: HUB_PUBLIC_URL={HUB_PUBLIC_URL} | WORKER_IMAGE={WORKER_DOCKER_IMAGE}")
+def get_config():
+    env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env")
+    load_dotenv(dotenv_path=env_path, override=True)
+    return {
+        "api_key": os.getenv("VAST_API_KEY", "").strip(),
+        "hub_url": os.getenv("HUB_PUBLIC_URL", "http://localhost:8000").strip(),
+        "max_gpus": int(os.getenv("MAX_CONCURRENT_GPUS", "100")),
+        "worker_image": os.getenv("WORKER_DOCKER_IMAGE", "minhtu98/vast-translator:latest").strip(),
+        "use_latest": os.getenv("USE_LATEST_IMAGE", "false").lower() == "true",
+        "engine": os.getenv("TRANSLATION_ENGINE", "llamacpp").strip(),
+        "model_repo": os.getenv("HF_MODEL_REPO", "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive").strip(),
+        "gguf_name": os.getenv("GGUF_FILE_NAME", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf").strip()
+    }
 
 VAST_API_URL_V0 = "https://console.vast.ai/api/v0"
 VAST_API_URL_V1 = "https://console.vast.ai/api/v1"
@@ -36,11 +43,12 @@ def get_current_git_sha():
 
 def save_instance_log(instance_id: int):
     """Tải log của instance từ Vast.ai và lưu lại ở Hub trước khi hủy máy ảo để sếp tiện debug"""
-    if not VAST_API_KEY:
+    cfg = get_config()
+    if not cfg["api_key"]:
         return
     try:
         # 1. Gọi PUT để yêu cầu tạo log từ Vast.ai
-        url = f"{VAST_API_URL_V0}/instances/request_logs/{instance_id}/?api_key={VAST_API_KEY}"
+        url = f"{VAST_API_URL_V0}/instances/request_logs/{instance_id}/?api_key={cfg['api_key']}"
         print(f"[Provisioner] Yêu cầu Vast.ai tạo log cho máy ảo {instance_id}: PUT {url}")
         res = requests.put(url, json={}, headers=get_headers(), timeout=15)
         
@@ -78,18 +86,20 @@ def save_instance_log(instance_id: int):
         print(f"[Provisioner] Lỗi hệ thống khi tải log máy {instance_id}: {e}")
 
 def get_headers():
+    cfg = get_config()
     return {
         "Accept": "application/json",
-        "Authorization": f"Bearer {VAST_API_KEY}" if VAST_API_KEY else ""
+        "Authorization": f"Bearer {cfg['api_key']}" if cfg['api_key'] else ""
     }
 
 def get_vast_instances():
     """Lấy danh sách các instance hiện tại trên tài khoản Vast.ai"""
-    if not VAST_API_KEY:
+    cfg = get_config()
+    if not cfg["api_key"]:
         print("[Provisioner] Bỏ qua lấy instance do thiếu VAST_API_KEY.")
         return []
     try:
-        url = f"{VAST_API_URL_V1}/instances/?api_key={VAST_API_KEY}"
+        url = f"{VAST_API_URL_V1}/instances/?api_key={cfg['api_key']}"
         print(f"[Provisioner] Gọi API Vast.ai lấy danh sách máy: GET {url}")
         res = requests.get(url, headers=get_headers(), timeout=15)
         if res.status_code == 200:
@@ -104,7 +114,8 @@ def get_vast_instances():
 
 def start_instance(instance_id: int):
     """Khởi động lại một instance đang bị Stopped"""
-    url = f"{VAST_API_URL_V0}/instances/{instance_id}/?api_key={VAST_API_KEY}"
+    cfg = get_config()
+    url = f"{VAST_API_URL_V0}/instances/{instance_id}/?api_key={cfg['api_key']}"
     print(f"[Provisioner] Yêu cầu khởi động máy {instance_id}: PUT {url}")
     try:
         res = requests.put(url, json={"state": "running"}, headers=get_headers(), timeout=15)
@@ -119,22 +130,17 @@ def start_instance(instance_id: int):
 
 def destroy_instance(instance_id: int):
     """Hủy hoàn toàn một instance để dừng tính tiền"""
-    url = f"{VAST_API_URL_V0}/instances/{instance_id}/?api_key={VAST_API_KEY}"
+    cfg = get_config()
+    url = f"{VAST_API_URL_V0}/instances/{instance_id}/?api_key={cfg['api_key']}"
     print(f"[Provisioner] Yêu cầu hủy (Destroy) máy {instance_id} để dừng tính tiền: DELETE {url}")
     try:
         res = requests.delete(url, headers=get_headers(), timeout=15)
         if res.status_code == 200:
             print(f"[Provisioner] Đã ra lệnh Destroy máy GPU {instance_id} thành công.")
-            return True
-        else:
-            print(f"[Provisioner] Lỗi destroy máy GPU {instance_id}: Status {res.status_code} - Phản hồi: {res.text}")
-    except Exception as e:
-        print(f"[Provisioner] Lỗi kết nối khi destroy máy GPU {instance_id}: {e}")
-    return False
-
 def rent_new_gpu() -> str:
     """Tìm kiếm và thuê thêm 1 GPU RTX 4090 rẻ nhất có mạng >= 1 Gbps, trả về contract_id nếu thành công"""
-    if not VAST_API_KEY:
+    cfg = get_config()
+    if not cfg["api_key"]:
         print("[Provisioner] Chưa cấu hình VAST_API_KEY, bỏ qua thuê máy.")
         return None
         
@@ -149,7 +155,7 @@ def rent_new_gpu() -> str:
             "type": "on-demand",
             "allocated_storage": 40.0
         }
-        search_url = f"{VAST_API_URL_V0}/bundles/?api_key={VAST_API_KEY}"
+        search_url = f"{VAST_API_URL_V0}/bundles/?api_key={cfg['api_key']}"
         print(f"[Provisioner] Đang tìm kiếm GPU RTX 4090 trống rẻ nhất (mạng >= 1Gbps): POST {search_url} | Query: {query}")
         res = requests.post(search_url, json=query, headers=get_headers(), timeout=15)
         
@@ -170,31 +176,41 @@ def rent_new_gpu() -> str:
         
         print(f"[Provisioner] Tìm thấy GPU RTX 4090 rẻ nhất: Offer ID {offer_id}, Host ID {cheapest_offer.get('host_id')}, Giá {price}$/giờ, Mạng down: {cheapest_offer.get('inet_down')} Mbps")
         
-        # Xác định image name kèm Git SHA tag để tránh cache
-        image_name = WORKER_DOCKER_IMAGE
-        if WORKER_DOCKER_IMAGE.endswith(":latest"):
+        # Xác định image name kèm Git SHA tag để tránh cache (cho phép ghi đè qua USE_LATEST_IMAGE)
+        image_name = cfg["worker_image"]
+        use_latest = cfg["use_latest"]
+        if cfg["worker_image"].endswith(":latest") and not use_latest:
             sha = get_current_git_sha()
             if sha:
-                base_image = WORKER_DOCKER_IMAGE.rsplit(":", 1)[0]
+                base_image = cfg["worker_image"].rsplit(":", 1)[0]
                 image_name = f"{base_image}:{sha}"
                 print(f"[Provisioner] Dùng tag Git SHA để tránh cache: {image_name}")
-
+        elif use_latest:
+            print(f"[Provisioner] Ép buộc sử dụng Docker tag LATEST để test nhanh: {image_name}")
+ 
         # Gọi lệnh thuê máy
-        rent_url = f"{VAST_API_URL_V0}/asks/{offer_id}/?api_key={VAST_API_KEY}"
+        rent_url = f"{VAST_API_URL_V0}/asks/{offer_id}/?api_key={cfg['api_key']}"
         payload = {
             "client_id": "me",
             "image": image_name,
             "env": {
-                "HUB_URL": HUB_PUBLIC_URL,
-                "TRANSLATION_ENGINE": os.getenv("TRANSLATION_ENGINE", "llamacpp"),
-                "HF_MODEL_REPO": os.getenv("HF_MODEL_REPO", "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive"),
-                "GGUF_FILE_NAME": os.getenv("GGUF_FILE_NAME", "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf")
+                "HUB_URL": cfg["hub_url"],
+                "TRANSLATION_ENGINE": cfg["engine"],
+                "HF_MODEL_REPO": cfg["model_repo"],
+                "GGUF_FILE_NAME": cfg["gguf_name"]
             },
             "disk": 40.0, # 40GB đủ cho CUDA runtime + cache models không bị tràn overlayfs
             "runtype": "args"
         }
         print(f"[Provisioner] Đang tiến hành thuê máy: PUT {rent_url} | Payload: {payload}")
         rent_res = requests.put(rent_url, json=payload, headers=get_headers(), timeout=15)
+        
+        if rent_res.status_code == 200:
+            contract_id = rent_res.json().get("new_contract")
+            print(f"[Provisioner] Thuê máy thành công! Contract ID / Instance ID mới: {contract_id}")
+            return str(contract_id)
+        else:
+            print(f"[Provisioner] Lỗi thuê máy: Status {rent_res.status_code} - Phản hồi: {rent_res.text}")es = requests.put(rent_url, json=payload, headers=get_headers(), timeout=15)
         
         if rent_res.status_code == 200:
             contract_id = rent_res.json().get("new_contract")
