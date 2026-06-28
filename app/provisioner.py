@@ -264,6 +264,7 @@ def handle_timeouts():
 
 def run_provisioner_cycle():
     """Thực thi một chu kỳ kiểm tra và phân phối tài nguyên"""
+    cfg = get_config()
     pending_jobs = get_pending_jobs()
     pending_count = len(pending_jobs)
     
@@ -389,8 +390,8 @@ def run_provisioner_cycle():
     print(f"[Provisioner] [CHU KỲ] Hàng đợi: {pending_count} PENDING ({unassigned_count} chưa gán) | Active: {active_count} GPU {active_ids} | Stopped: {len(stopped_instances)} GPU {stopped_ids}")
     
     # Chỉ thuê máy cho những job chưa gán máy và chưa vượt giới hạn
-    if active_count < MAX_CONCURRENT_GPUS:
-        needed = min(unassigned_count, MAX_CONCURRENT_GPUS - active_count)
+    if active_count < cfg["max_gpus"]:
+        needed = min(unassigned_count, cfg["max_gpus"] - active_count)
         print(f"[Provisioner] Cần cấp phát thêm {needed} GPU cho các job chưa gán.")
         
         for i in range(needed):
