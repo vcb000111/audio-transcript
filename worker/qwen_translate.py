@@ -139,16 +139,29 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
                 ]
                 response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
                 
-            # Loại bỏ thẻ think và suy nghĩ tự do (free-form thinking process) nếu có
-            response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+            # Xử lý thẻ think bị cụt (nếu có mở <think> nhưng không có đóng </think> do bị cắt giữa chừng)
+            if "<think>" in response:
+                if "</think>" in response:
+                    response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+                else:
+                    response = response.split("<think>")[0].strip()
+
+            # Loại bỏ các tiêu đề suy nghĩ tự do (Thinking Process, Thought, Analysis)
             response = re.sub(r"(Thinking Process|Thought|Analysis):.*?(?=\n\n|\Z)", "", response, flags=re.DOTALL | re.IGNORECASE).strip()
+            # Cắt đuôi nếu còn sót tàn dư suy nghĩ tự do chưa kết thúc
+            for key in ["thinking process", "thought", "analysis"]:
+                if key in response.lower():
+                    response = response.lower().split(key)[0].strip()
+
             # Làm sạch phản hồi
             response = response.strip('"\' \n\t')
             
-            # Kiểm tra xem bản dịch có chứa chữ nước ngoài hay câu từ chối dịch không
-            is_refusal = any(k in response for k in ["không thể", "yêu cầu", "phù hợp", "từ chối", "đề xuất", "chính sách"])
+            # Kiểm tra xem bản dịch có chứa chữ nước ngoài, câu từ chối hoặc tàn dư suy nghĩ không
+            is_refusal = any(k in response.lower() for k in ["không thể", "yêu cầu", "phù hợp", "từ chối", "đề xuất", "chính sách", "thinking", "thought", "analysis", "<think>"])
+            # Phát hiện nếu model đang luyên thuyên giải thích dông dài
+            is_too_long = len(text) < 20 and len(response) > 100
             
-            if response and response != text and not contains_foreign_script(response) and not is_refusal:
+            if response and response != text and not contains_foreign_script(response) and not is_refusal and not is_too_long:
                 return response
             else:
                 print(f"[LLM] Cảnh báo: Bản dịch bị từ chối hoặc chứa chữ ngoại lai ở lần thử {attempt+1}: {response}")
@@ -179,12 +192,29 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
             gen_ids_min = [o[len(i):] for i, o in zip(inputs_min.input_ids, gen_ids_min)]
             response_min = tokenizer.batch_decode(gen_ids_min, skip_special_tokens=True)[0].strip()
             
-        response_min = re.sub(r"<think>.*?</think>", "", response_min, flags=re.DOTALL).strip()
+        # Xử lý thẻ think bị cụt (nếu có mở <think> nhưng không có đóng </think> do bị cắt giữa chừng)
+        if "<think>" in response_min:
+            if "</think>" in response_min:
+                response_min = re.sub(r"<think>.*?</think>", "", response_min, flags=re.DOTALL).strip()
+            else:
+                response_min = response_min.split("<think>")[0].strip()
+
+        # Loại bỏ các tiêu đề suy nghĩ tự do (Thinking Process, Thought, Analysis)
         response_min = re.sub(r"(Thinking Process|Thought|Analysis):.*?(?=\n\n|\Z)", "", response_min, flags=re.DOTALL | re.IGNORECASE).strip()
+        # Cắt đuôi nếu còn sót tàn dư suy nghĩ tự do chưa kết thúc
+        for key in ["thinking process", "thought", "analysis"]:
+            if key in response_min.lower():
+                response_min = response_min.lower().split(key)[0].strip()
+
+        # Làm sạch phản hồi
         response_min = response_min.strip('"\' \n\t')
         
-        is_refusal_min = any(k in response_min for k in ["không thể", "yêu cầu", "phù hợp", "từ chối"])
-        if response_min and response_min != text and not contains_foreign_script(response_min) and not is_refusal_min:
+        # Kiểm tra xem bản dịch có chứa chữ nước ngoài, câu từ chối hoặc tàn dư suy nghĩ không
+        is_refusal_min = any(k in response_min.lower() for k in ["không thể", "yêu cầu", "phù hợp", "từ chối", "đề xuất", "chính sách", "thinking", "thought", "analysis", "<think>"])
+        # Phát hiện nếu model đang luyên thuyên giải thích dông dài
+        is_too_long_min = len(text) < 20 and len(response_min) > 100
+        
+        if response_min and response_min != text and not contains_foreign_script(response_min) and not is_refusal_min and not is_too_long_min:
             return response_min
     except Exception as e_min:
         print(f"[LLM] Lỗi ở chế độ tối giản: {e_min}")
