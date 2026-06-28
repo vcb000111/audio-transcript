@@ -36,8 +36,9 @@ RUN pip install --no-cache-dir \
 # Bật hf-transfer để tăng tốc download model trong quá trình build Docker
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
-# Cài đặt llama-cpp-python hỗ trợ tăng tốc GPU CUDA bằng pre-built wheels (chỉ mất 10 giây tải whl)
-RUN pip install llama-cpp-python --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cu121 --no-cache-dir
+# Thiết lập biến môi trường biên dịch CUDA cho llama-cpp-python
+ENV CMAKE_ARGS="-DLLAMA_CUDA=on"
+RUN pip install llama-cpp-python --force-reinstall --upgrade --no-cache-dir
 
 # Copy file cache và tải trước các model weights về cache của image
 COPY cache_models.py /app/
