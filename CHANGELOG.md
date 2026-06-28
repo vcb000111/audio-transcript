@@ -39,5 +39,8 @@ Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận
 - Khắc phục lỗi build Docker image bị nghẽn mạng do lỗi rate limit API Hugging Face (lỗi 429 Too Many Requests) bằng cách tích hợp hàm tự động tải lại thông minh `download_with_retry` có cơ chế tăng dần thời gian chờ (exponential backoff) trong script [cache_models.py](file:///d:/Projects/SubtitleVastAI/worker/cache_models.py).
 - Khắc phục lỗi sập Docker daemon trên GitHub Actions runner (`Error: The process '/usr/bin/docker' failed with exit code 1`) bằng cách loại bỏ việc xóa thư mục hệ thống `$AGENT_TOOLSDIRECTORY` trong tệp tin cấu hình workflow [.github/workflows/build-worker.yaml](file:///d:/Projects/SubtitleVastAI/.github/workflows/build-worker.yaml).
 - Tối ưu hóa thời gian build Docker image cho Spoke Worker bằng cách cài đặt thư viện `llama-cpp-python` thông qua chỉ mục **Pre-built Wheels** của nhà phát triển cấu hình sẵn CUDA 12.1, giúp rút ngắn thời gian compile từ 40 phút xuống còn **10 giây**.
+- Giảm tải dung lượng Docker image Spoke Worker bằng cách tạm thời vô hiệu hóa việc tải trước và cache mô hình Transformers tiêu chuẩn `Qwen/Qwen3.5-9B` (tiết kiệm ~18GB đĩa cứng và băng thông mạng khi đóng gói/pull image).
+- Cấu hình bổ sung các biến môi trường NVIDIA/CUDA Toolkit trong Dockerfile để đảm bảo llama-cpp-python và driver GPU của Vast.ai nhận diện GPU thành công 100% khi khởi chạy ở runtime (tránh lỗi tự động fallback về CPU gây chậm hệ thống).
+
 
 
