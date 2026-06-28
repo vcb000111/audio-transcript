@@ -9,9 +9,9 @@ Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận
 - Tối ưu hóa tham số bóc băng Whisper ASR (`condition_on_previous_text=False`) để giải quyết triệt để lỗi lặp câu vô hạn (hallucination loop).
 - Nâng cấp mô hình Qwen LLM sang chế độ dịch thuật theo cụm (Batch-of-Context) kèm cơ chế phòng chống lệch dòng phụ đề (Desync Fallback).
 - Khắc phục lỗi hiển thị tiền tố số thứ tự lọt vào phụ đề dịch bằng cách lọc regex đầu ra của `translate_batch`.
-- Tích hợp tính năng tự động nhận diện mối quan hệ nhân vật chính toàn cục (Global Speaker Relationship) giúp thống nhất xưng hô tự nhiên.
+- Phát triển cơ chế LLM Script Context Analyzer tự động trích lọc câu thoại mẫu và dùng LLM phân tích bối cảnh để sinh ra quy tắc xưng hô và bản đồ thay thế đại từ JSON động cho mọi bộ phim.
 - Bổ sung thuật toán hậu xử lý lọc trùng lặp liên tiếp (`deduplicate_subtitles`) đối với các câu có khoảng thời gian cực ngắn và độ tương đồng cao.
-- Thêm tên nhân vật `Rino` vào `initial_prompt` của Whisper ASR để tránh lỗi nhận diện nhầm âm thanh (Rino nghe nhầm thành con chó/inu) khi không dùng ngữ cảnh trượt.
+- Linh hoạt hóa tham số bóc băng: Hỗ trợ nhận và truyền `--initial_prompt` động từ Hub qua Worker Daemon vào Whisper ASR nhằm định hướng phiên âm chính xác cho bất kỳ phim nào.
 
 ## [1.0.0] - 2026-06-26
 

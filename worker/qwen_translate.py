@@ -20,90 +20,143 @@ def contains_foreign_script(text: str) -> bool:
     pattern = re.compile(r"[\u4e00-\u9fff\u3040-\u309f\u30a0-\u30ff\u0e00-\u0e7f\uac00-\ud7a3]")
     return bool(pattern.search(text))
 
-def analyze_global_speaker_relationship(segments: list) -> str:
-    """Quét toàn bộ danh sách phân đoạn để nhận diện mối quan hệ chính giữa các nhân vật"""
-    full_text = " ".join([seg["text"] for seg in segments])
+def analyze_script_context_via_llm(model, tokenizer, segments: list, is_llamacpp=True) -> dict:
+    """
+    Rút trích các mẫu câu chứa đại từ tiếng Nhật quan trọng và dùng LLM để phân tích
+    mối quan hệ toàn cục và quy tắc xưng hô dưới dạng cấu trúc JSON.
+    """
+    print("[LLM-ANALYZER] Đang trích xuất câu thoại mẫu để phân tích bối cảnh phim...")
     
-    # Đếm số lượng từ khóa mối quan hệ
-    sibling_keys = ["お兄ちゃん", "おにいちゃん", "兄ちゃん", "お兄様", "妹", "いもうと"]
-    teacher_keys = ["先生", "せんせい", "生徒", "せいto"]
-    senpai_keys = ["先輩", "せんぱい", "後輩", "こうはい"]
+    # 1. Lọc thông minh câu thoại chứa đại từ nhân xưng/vai vế quan trọng
+    keywords = ["お兄ちゃん", "お姉ちゃん", "妹", "先生", "先輩", "俺", "僕", "私", "あなた", "君", "パパ", "ママ", "旦那", "奥さん"]
+    candidate_segments = []
     
-    sibling_count = sum(full_text.count(k) for k in sibling_keys)
-    teacher_count = sum(full_text.count(k) for k in teacher_keys)
-    senpai_count = sum(full_text.count(k) for k in senpai_keys)
+    for seg in segments:
+        text = seg["text"]
+        if len(text) > 12 and any(k in text for k in keywords):
+            candidate_segments.append(text)
+            
+    # Lấy tối đa 25 câu đại diện để không vượt quá token ngữ cảnh
+    sample_texts = candidate_segments[:25]
     
-    if sibling_count > 0 and sibling_count >= max(teacher_count, senpai_count):
-        return (
-            "BỐI CẢNH TOÀN CỤC: Đây là cuộc trò chuyện thân mật giữa ANH TRAI và EM GÁI (Rino).\n"
-            "QUY TẮC XƯNG HÔ TOÀN CỤC:\n"
-            "- Em gái gọi anh trai là 'Anh' hoặc 'Anh hai', xưng 'Em'.\n"
-            "- Anh trai gọi em gái là 'Em' hoặc 'Rino', xưng 'Anh' khi nói chuyện trực tiếp. Khi tự sự (suy nghĩ trong đầu), xưng 'Tôi'.\n"
-            "- TUYỆT ĐỐI KHÔNG dùng các từ: 'bạn', 'cậu', 'tao', 'mày', 'tôi' (khi giao tiếp trực tiếp), 'đại ca'."
-        )
-    elif teacher_count > 0 and teacher_count >= max(sibling_count, senpai_count):
-        return (
-            "BỐI CẢNH TOÀN CỤC: Đây là cuộc trò chuyện giữa THẦY/CÔ GIÁO và HỌC SINH.\n"
-            "QUY TẮC XƯNG HÔ TOÀN CỤC:\n"
-            "- Học sinh gọi thầy/cô là 'Thầy' hoặc 'Cô', xưng 'Em'.\n"
-            "- Thầy/cô gọi học sinh là 'Em' hoặc xưng 'Thầy'/'Cô'."
-        )
-    elif senpai_count > 0 and senpai_count >= max(sibling_count, teacher_count):
-        return (
-            "BỐI CẢNH TOÀN CỤC: Đây là cuộc trò chuyện giữa TIỀN BỐI (đàn anh/đàn chị) và HẬU BỐI (đàn em).\n"
-            "QUY TẮC XƯNG HÔ TOÀN CỤC:\n"
-            "- Hậu bối gọi tiền bối là 'Anh' hoặc 'Chị', xưng 'Em'.\n"
-            "- Tiền bối gọi hậu bối là 'Em', xưng 'Anh' hoặc 'Chị'."
-        )
+    # Nếu không tìm thấy câu chứa đại từ, lấy 20 câu đầu tiên của kịch bản
+    if len(sample_texts) < 5:
+        sample_texts = [seg["text"] for seg in segments[:20]]
         
-    return (
-        "BỐI CẢNH TOÀN CỤC: Cuộc trò chuyện thân mật, tự nhiên.\n"
-        "QUY TẮC XƯNG HÔ TOÀN CỤC: Dịch xưng hô linh hoạt, tự nhiên theo ngữ cảnh."
+    sample_dialogue = "\n".join([f"- {text}" for text in sample_texts])
+    
+    system_prompt = (
+        "Bạn là một biên dịch viên phụ đề phim Nhật Bản sang tiếng Việt chuyên nghiệp.\n"
+        "Nhiệm vụ: Phân tích các câu thoại tiếng Nhật dưới đây và trả về quy tắc xưng hô tiếng Việt phù hợp nhất dưới dạng đối tượng JSON.\n"
+        "YÊU CẦU BẮT BUỘC:\n"
+        "- Trả về duy nhất một cấu trúc JSON hợp lệ.\n"
+        "- KHÔNG ĐƯỢC SUY NGHĨ. Tuyệt đối không viết giải thích, không sử dụng thẻ <think>...</think>.\n"
+        "- Cấu trúc JSON bắt buộc phải theo mẫu sau:\n"
+        "{\n"
+        '  "role_play_rules": "Bối cảnh quan hệ (ví dụ: Quan hệ vợ chồng, thầy trò, anh em). Nhân vật 1 xưng gì gọi nhân vật 2 là gì...",\n'
+        '  "replacements": {\n'
+        '    "tôi": "anh",\n'
+        '    "bạn": "em"\n'
+        '  }\n'
+        "}\n"
+        "- Phần 'replacements' định nghĩa các quy tắc thay thế đại từ nhân xưng thô của Google Translate sang xưng hô tự nhiên của nhân vật trong phim."
     )
+    
+    user_prompt = (
+        "Dưới đây là một số câu thoại mẫu trong phim:\n\n"
+        f"{sample_dialogue}\n\n"
+        "Hãy phân tích và trả về đối tượng JSON quy tắc xưng hô:"
+    )
+    
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+    
+    # Fallback mặc định nếu có lỗi
+    default_rules = {
+        "role_play_rules": "BỐI CẢNH TOÀN CỤC: Giao tiếp thân mật thông thường.\nQUY TẮC XƯNG HÔ TOÀN CỤC: Người lớn tuổi/Nam xưng Anh/Tôi, gọi Em/Cậu. Người nhỏ tuổi/Nữ xưng Em, gọi Anh/Chị. Tránh dùng tao/bạn/mày.",
+        "replacements": {
+            "tôi": "anh",
+            "bạn": "em"
+        }
+    }
+    
+    try:
+        if is_llamacpp:
+            response_data = model.create_chat_completion(
+                messages=messages,
+                max_tokens=512,
+                temperature=0.3,
+                top_p=0.8,
+                top_k=20
+            )
+            response = response_data["choices"][0]["message"]["content"].strip()
+        else:
+            text_in = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            model_inputs = tokenizer([text_in], return_tensors="pt").to(model.device)
+            generated_ids = model.generate(
+                **model_inputs,
+                max_new_tokens=512,
+                temperature=0.3,
+                top_p=0.8,
+                top_k=20,
+                do_sample=True
+            )
+            generated_ids = [
+                output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+            ]
+            response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+            
+        # Làm sạch thẻ think hoặc markdown block nếu có
+        if "<think>" in response:
+            if "</think>" in response:
+                response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+            else:
+                response = response.split("<think>")[0].strip()
+                
+        if "```json" in response:
+            response = response.split("```json")[1].split("```")[0].strip()
+        elif "```" in response:
+            response = response.split("```")[1].strip()
+            
+        parsed = json.loads(response)
+        if "role_play_rules" in parsed and "replacements" in parsed:
+            print("[LLM-ANALYZER] Phân tích bối cảnh kịch bản thành công!")
+            return parsed
+    except Exception as e:
+        print(f"[LLM-ANALYZER] Lỗi trong quá trình phân tích kịch bản bằng LLM: {e}. Sử dụng bối cảnh mặc định.")
+        
+    return default_rules
 
-def clean_vietnamese_pronouns(text: str, relationship: str) -> str:
-    """Làm sạch các từ xưng hô mặc định từ Google Translate dựa trên quan hệ nhân vật"""
-    if not relationship:
+def clean_vietnamese_pronouns(text: str, replacements: dict) -> str:
+    """Làm sạch các từ xưng hô mặc định từ Google Translate dựa trên bản đồ thay thế động"""
+    if not replacements:
         return text
-    if "ANH TRAI và EM GÁI" in relationship:
-        # Thay thế các từ xưng hô sai lệch phổ biến
-        text = re.sub(r"\bbạn\b", "em", text, flags=re.IGNORECASE)
-        text = re.sub(r"\btôi\b", "anh", text, flags=re.IGNORECASE)
-        text = re.sub(r"\banh trai của bạn\b", "anh hai", text, flags=re.IGNORECASE)
-        text = re.sub(r"\banh trai bạn\b", "anh hai", text, flags=re.IGNORECASE)
-        text = re.sub(r"\btao\b", "em", text, flags=re.IGNORECASE)
-        text = re.sub(r"\bmày\b", "anh", text, flags=re.IGNORECASE)
+    for target, rep in replacements.items():
+        pattern = re.compile(rf"\b{re.escape(target)}\b", re.IGNORECASE)
+        text = pattern.sub(rep, text)
+        
+    # Các từ xưng hô cấm lọt
+    text = re.sub(r"\btao\b", "em", text, flags=re.IGNORECASE)
+    text = re.sub(r"\bmày\b", "anh", text, flags=re.IGNORECASE)
     return text
 
 def detect_speaker_info(text: str) -> str:
-    """Phân tích câu thoại tiếng Nhật để đoán vai vế người nói và hướng dẫn xưng hô"""
-    # Em gái gọi anh trai
+    """Phân tích câu thoại tiếng Nhật để đoán vai vế xưng hô cục bộ của câu"""
     if any(k in text for k in ["お兄ちゃん", "おにいちゃん", "兄ちゃん", "お兄様"]):
-        return (
-            "VAI VẾ NHÂN VẬT: Người nói là EM GÁI (Rino), đang nói chuyện với ANH TRAI.\n"
-            "QUY TẮC XƯNG HÔ: Em gái gọi anh trai là 'Anh' hoặc 'Anh hai' và xưng 'Em'. Không dùng 'Tôi', 'Cậu', 'Mày'."
-        )
-    # Anh trai tự sự hoặc nói với em gái (dùng boku, ore)
-    if any(k in text for k in ["僕", "ぼく", "俺", "おれ"]):
-        if "妹" in text:
-            return (
-                "VAI VẾ NHÂN VẬT: Người nói là ANH TRAI đang giới thiệu/nói về em gái (Rino).\n"
-                "QUY TẮC XƯNG HÔ: Xưng 'Tôi' hoặc 'Anh' khi nói về em gái. Ví dụ: 'Em gái tôi, Rino'."
-            )
-        return (
-            "VAI VẾ NHÂN VẬT: Người nói là ANH TRAI, đang nói với em gái (Rino) hoặc đang tự sự thầm.\n"
-            "QUY TẮC XƯNG HÔ: Nếu nói với em gái, xưng 'Anh' và gọi em gái là 'Em' hoặc 'Rino'. Nếu đang tự thoại thầm (suy nghĩ trong đầu), xưng 'Tôi' hoặc 'Anh'."
-        )
-    # Em gái xưng watashi
-    if "私" in text or "わたし" in text:
-        return (
-            "VAI VẾ NHÂN VẬT: Người nói là EM GÁI (Rino) nói với anh trai.\n"
-            "QUY TẮC XƯNG HÔ: Gọi anh trai là 'Anh'/'Anh hai', xưng 'Em'."
-        )
-    
-    return "VAI VẾ NHÂN VẬT: Cuộc trò chuyện thân mật trong gia đình giữa hai anh em. Hãy dịch xưng hô tự nhiên là 'Anh' - 'Em'."
+        return "GỢI Ý CỤC BỘ: Người nói đang gọi đối phương là ANH TRAI."
+    if any(k in text for k in ["お姉ちゃん", "おねえちゃん", "姉ちゃん"]):
+        return "GỢI Ý CỤC BỘ: Người nói đang gọi đối phương là CHỊ GÁI."
+    if any(k in text for k in ["先生", "せんせい"]):
+        return "GỢI Ý CỤC BỘ: Người nói đang gọi đối phương là THẦY/CÔ GIÁO."
+    if any(k in text for k in ["先輩", "せんぱい"]):
+        return "GỢI Ý CỤC BỘ: Người nói đang gọi đối phương là TIỀN BỐI (đàn anh/đàn chị)."
+    if any(k in text for k in ["社長", "部長", "課長"]):
+        return "GỢI Ý CỤC BỘ: Người nói đang gọi đối phương là CẤP TRÊN (Sếp)."
+    return ""
 
-def google_translate_fallback(text: str, relationship: str = "") -> str:
+def google_translate_fallback(text: str, replacements: dict = None) -> str:
     """Gọi Google Translate API miễn phí làm phương án dự phòng cuối cùng để đảm bảo có tiếng Việt"""
     try:
         import requests
@@ -120,14 +173,14 @@ def google_translate_fallback(text: str, relationship: str = "") -> str:
             result = res.json()
             translated = "".join([part[0] for part in result[0] if part[0]])
             if translated:
-                translated = clean_vietnamese_pronouns(translated.strip(), relationship)
+                translated = clean_vietnamese_pronouns(translated.strip(), replacements)
                 print(f"[LLM-FALLBACK] Dịch thành công qua Google Translate: '{text}' -> '{translated}'")
                 return translated
     except Exception as e:
         print(f"[LLM-FALLBACK] Lỗi gọi Google Translate API: {e}")
     return text
 
-def translate_single_text(model, tokenizer, text, history_context=[], global_relationship="", retries=2):
+def translate_single_text(model, tokenizer, text, history_context=[], global_relationship="", replacements=None, retries=2):
     # Xác định loại động cơ dịch dựa trên instance của model
     is_llamacpp = False
     try:
@@ -169,12 +222,10 @@ def translate_single_text(model, tokenizer, text, history_context=[], global_rel
     for attempt in range(retries):
         try:
             if is_llamacpp:
-                # 151357 là ID của token '<think>' trong tokenizer của Qwen
-                # Đặt logit_bias cực âm -100 để ngăn cấm tuyệt đối model sinh ra token '<think>'
                 response_data = model.create_chat_completion(
                     messages=messages,
                     max_tokens=256,
-                    temperature=0.5 if attempt == retries - 1 else 0.7, # Nâng nhiệt độ để dịch văn phong tự nhiên hơn
+                    temperature=0.5 if attempt == retries - 1 else 0.7,
                     top_p=0.8,
                     top_k=20
                 )
@@ -195,16 +246,15 @@ def translate_single_text(model, tokenizer, text, history_context=[], global_rel
                 ]
                 response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
                 
-            # Xử lý thẻ think bị cụt (nếu có mở <think> nhưng không có đóng </think> do bị cắt giữa chừng)
+            # Xử lý thẻ think bị cụt
             if "<think>" in response:
                 if "</think>" in response:
                     response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
                 else:
                     response = response.split("<think>")[0].strip()
 
-            # Loại bỏ các tiêu đề suy nghĩ tự do (Thinking Process, Thought, Analysis)
+            # Loại bỏ các tiêu đề suy nghĩ tự do
             response = re.sub(r"(Thinking Process|Thought|Analysis):.*?(?=\n\n|\Z)", "", response, flags=re.DOTALL | re.IGNORECASE).strip()
-            # Cắt đuôi nếu còn sót tàn dư suy nghĩ tự do chưa kết thúc
             for key in ["thinking process", "thought", "analysis"]:
                 if key in response.lower():
                     response = response.lower().split(key)[0].strip()
@@ -214,7 +264,6 @@ def translate_single_text(model, tokenizer, text, history_context=[], global_rel
             
             # Kiểm tra xem bản dịch có chứa chữ nước ngoài, câu từ chối hoặc tàn dư suy nghĩ không
             is_refusal = any(k in response.lower() for k in ["không thể", "yêu cầu", "phù hợp", "từ chối", "đề xuất", "chính sách", "thinking", "thought", "analysis", "<think>"])
-            # Phát hiện nếu model đang luyên thuyên giải thích dông dài
             is_too_long = len(text) < 20 and len(response) > 100
             
             if response and response != text and not contains_foreign_script(response) and not is_refusal and not is_too_long:
@@ -224,18 +273,18 @@ def translate_single_text(model, tokenizer, text, history_context=[], global_rel
         except Exception as e:
             print(f"[LLM] Lỗi khi dịch câu '{text}' ở lần thử {attempt+1}: {e}")
             
-    # 2. Fallback tối giản (Minimalist Fallback) nếu gặp sự cố/kiểm duyệt
+    # 2. Fallback tối giản
     print(f"[LLM] Kích hoạt chế độ dịch tối giản (Minimalist Prompt) cho câu nhạy cảm: '{text}'")
     try:
         minimal_messages = [
-            {"role": "system", "content": "Bạn là biên dịch viên tiếng Nhật sang tiếng Việt. Chỉ trả về duy nhất câu dịch tiếng Việt thuần túy, không chứa chữ Nhật, không giải thích."},
+            {"role": "system", "content": "Bạn là biên biên dịch viên tiếng Nhật sang tiếng Việt. Chỉ trả về duy nhất câu dịch tiếng Việt thuần túy, không chứa chữ Nhật, không giải thích."},
             {"role": "user", "content": f"Dịch câu thoại này sang tiếng Việt: {text}"}
         ]
         if is_llamacpp:
             response_data = model.create_chat_completion(
                 messages=minimal_messages,
                 max_tokens=256,
-                temperature=0.4, # Nâng nhiệt độ một chút
+                temperature=0.4,
                 top_p=0.8,
                 top_k=20
             )
@@ -247,26 +296,20 @@ def translate_single_text(model, tokenizer, text, history_context=[], global_rel
             gen_ids_min = [o[len(i):] for i, o in zip(inputs_min.input_ids, gen_ids_min)]
             response_min = tokenizer.batch_decode(gen_ids_min, skip_special_tokens=True)[0].strip()
             
-        # Xử lý thẻ think bị cụt (nếu có mở <think> nhưng không có đóng </think> do bị cắt giữa chừng)
         if "<think>" in response_min:
             if "</think>" in response_min:
                 response_min = re.sub(r"<think>.*?</think>", "", response_min, flags=re.DOTALL).strip()
             else:
                 response_min = response_min.split("<think>")[0].strip()
 
-        # Loại bỏ các tiêu đề suy nghĩ tự do (Thinking Process, Thought, Analysis)
         response_min = re.sub(r"(Thinking Process|Thought|Analysis):.*?(?=\n\n|\Z)", "", response_min, flags=re.DOTALL | re.IGNORECASE).strip()
-        # Cắt đuôi nếu còn sót tàn dư suy nghĩ tự do chưa kết thúc
         for key in ["thinking process", "thought", "analysis"]:
             if key in response_min.lower():
                 response_min = response_min.lower().split(key)[0].strip()
 
-        # Làm sạch phản hồi
         response_min = response_min.strip('"\' \n\t')
         
-        # Kiểm tra xem bản dịch có chứa chữ nước ngoài, câu từ chối hoặc tàn dư suy nghĩ không
         is_refusal_min = any(k in response_min.lower() for k in ["không thể", "yêu cầu", "phù hợp", "từ chối", "đề xuất", "chính sách", "thinking", "thought", "analysis", "<think>"])
-        # Phát hiện nếu model đang luyên thuyên giải thích dông dài
         is_too_long_min = len(text) < 20 and len(response_min) > 100
         
         if response_min and response_min != text and not contains_foreign_script(response_min) and not is_refusal_min and not is_too_long_min:
@@ -274,24 +317,21 @@ def translate_single_text(model, tokenizer, text, history_context=[], global_rel
     except Exception as e_min:
         print(f"[LLM] Lỗi ở chế độ tối giản: {e_min}")
         
-    # 3. Sử dụng Google Translate API làm phương án cứu cánh cuối cùng để bảo đảm 100% có tiếng Việt
     print(f"[LLM-FALLBACK] Sử dụng Google Translate cho câu không thể dịch: '{text}'")
-    return google_translate_fallback(text, global_relationship)
+    return google_translate_fallback(text, replacements)
 
 def refine_translated_subtitles(model, tokenizer, segments, translated_texts, global_relationship="", is_llamacpp=True) -> list:
     """Đọc lại toàn bộ mạch hội thoại để tối ưu hóa phụ đề, thống nhất xưng hô và trau chuốt câu chữ"""
     print("[LLM-REFINE] Bắt đầu bước 2: Đọc lại toàn bộ hội thoại và tối ưu hóa phụ đề...")
     
     total_len = len(segments)
-    refined_texts = list(translated_texts) # Khởi tạo danh sách kết quả tối ưu
+    refined_texts = list(translated_texts)
     
-    # Chia phụ đề thành các batch nhỏ khoảng 25 câu để tránh tràn token đầu ra của LLM
     batch_size = 25
     for batch_start in range(0, total_len, batch_size):
         batch_end = min(batch_start + batch_size, total_len)
         print(f"[LLM-REFINE] Đang tối ưu hóa phân đoạn từ câu {batch_start + 1} đến {batch_end}...")
         
-        # Tạo prompt danh sách hội thoại cho batch này
         dialogue_list = []
         for i in range(batch_start, batch_end):
             orig = segments[i]["text"]
@@ -301,7 +341,7 @@ def refine_translated_subtitles(model, tokenizer, segments, translated_texts, gl
         dialogue_text = "\n".join(dialogue_list)
         
         system_prompt = (
-            "Bạn là một biên tập viên phụ đề phim Nhật Bản sang tiếng Việt chuyên nghiệp.\n"
+            "Bạn là một biên biên dịch viên phụ đề phim Nhật Bản sang tiếng Việt chuyên nghiệp.\n"
             "Nhiệm vụ: Rà soát, tối ưu hóa và làm mượt các bản dịch tạm thời bên dưới để phù hợp với ngữ cảnh hội thoại của phim.\n"
             "YÊU CẦU TỐI ƯU HÓA:\n"
             f"1. Thống nhất xưng hô: Dựa vào mạch truyện để sửa xưng hô đồng nhất từ đầu đến cuối.\n"
@@ -329,8 +369,8 @@ def refine_translated_subtitles(model, tokenizer, segments, translated_texts, gl
             if is_llamacpp:
                 response_data = model.create_chat_completion(
                     messages=messages,
-                    max_tokens=2048, # Tăng max_tokens đủ rộng để chứa kết quả dịch của 25 câu
-                    temperature=0.5, # Tăng nhiệt độ lên 0.5 để mô hình thông minh tự sửa lỗi và chuyển xưng hô tự nhiên
+                    max_tokens=2048,
+                    temperature=0.5,
                     top_p=0.8,
                     top_k=20
                 )
@@ -350,25 +390,20 @@ def refine_translated_subtitles(model, tokenizer, segments, translated_texts, gl
                 ]
                 response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
             
-            # Làm sạch tàn dư suy nghĩ nếu có
             response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
             response = re.sub(r"(Thinking Process|Thought|Analysis):.*?(?=\n\n|\Z)", "", response, flags=re.DOTALL | re.IGNORECASE).strip()
             response = response.strip()
             
-            # Phân tích kết quả trả về của LLM theo định dạng 'Số_thứ_tự. Câu_dịch'
             lines = response.split("\n")
             parsed_count = 0
             for line in lines:
                 line = line.strip()
-                # Khớp định dạng: bắt đầu bằng số thứ tự + dấu chấm + khoảng trắng
                 match = re.match(r"^(\d+)\.\s*(.*)$", line)
                 if match:
                     num = int(match.group(1))
                     refined_val = match.group(2).strip()
                     
-                    # Xác thực số thứ tự nằm trong phạm vi của batch hiện tại
                     if batch_start <= (num - 1) < batch_end:
-                        # Chỉ áp dụng nếu bản dịch tối ưu sạch (không chứa tiếng Nhật) và không rỗng
                         if refined_val and not contains_foreign_script(refined_val):
                             refined_texts[num - 1] = refined_val
                             parsed_count += 1
@@ -380,7 +415,7 @@ def refine_translated_subtitles(model, tokenizer, segments, translated_texts, gl
             
     return refined_texts
 
-def translate_batch(model, tokenizer, batch_segments, start_idx, global_relationship, is_llamacpp=True):
+def translate_batch(model, tokenizer, batch_segments, start_idx, global_relationship, replacements=None, is_llamacpp=True):
     """Dịch một lô các câu thoại tiếng Nhật sang tiếng Việt cùng lúc bằng định dạng JSON"""
     # Xây dựng input JSON cho model
     input_dict = {}
@@ -416,13 +451,12 @@ def translate_batch(model, tokenizer, batch_segments, start_idx, global_relation
         {"role": "user", "content": user_prompt}
     ]
     
-    # Thử dịch lô
     try:
         if is_llamacpp:
             response_data = model.create_chat_completion(
                 messages=messages,
                 max_tokens=1024,
-                temperature=0.3, # Giảm nhiệt độ để cấu trúc JSON chuẩn xác hơn
+                temperature=0.3,
                 top_p=0.8,
                 top_k=20
             )
@@ -443,35 +477,29 @@ def translate_batch(model, tokenizer, batch_segments, start_idx, global_relation
             ]
             response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
             
-        # Làm sạch thẻ think hoặc markdown code blocks nếu có
         if "<think>" in response:
             if "</think>" in response:
                 response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
             else:
                 response = response.split("<think>")[0].strip()
         
-        # Loại bỏ markdown code blocks
         if "```json" in response:
             response = response.split("```json")[1].split("```")[0].strip()
         elif "```" in response:
             response = response.split("```")[1].strip()
             
-        # Parse JSON
         result_dict = json.loads(response)
         
-        # Xác thực kết quả có đầy đủ và khớp khóa không
         validated_dict = {}
         for idx in range(len(batch_segments)):
             key = str(start_idx + idx + 1)
             if key in result_dict:
                 trans = result_dict[key].strip()
-                # Loại bỏ các tiền tố số thứ tự lọt vào giá trị dịch (ví dụ: "1. Bản dịch" -> "Bản dịch")
                 trans = re.sub(r"^\d+\.\s*", "", trans).strip()
-                # Kiểm tra bản dịch sạch (không rỗng và không chứa chữ ngoại lai)
+                trans = clean_vietnamese_pronouns(trans, replacements)
                 if trans and not contains_foreign_script(trans):
                     validated_dict[key] = trans
                     
-        # Nếu khớp số lượng câu hoàn chỉnh, trả về kết quả
         if len(validated_dict) == len(batch_segments):
             return [validated_dict[str(start_idx + idx + 1)] for idx in range(len(batch_segments))]
             
@@ -492,7 +520,6 @@ def deduplicate_subtitles(segments, translated_texts):
     new_segments = []
     new_translated = []
     
-    # Chỉ số câu thoại đầu tiên
     new_segments.append(dict(segments[0]))
     new_translated.append(translated_texts[0])
     
@@ -500,28 +527,22 @@ def deduplicate_subtitles(segments, translated_texts):
         prev_text = new_translated[-1].strip().lower()
         curr_text = translated_texts[i].strip().lower()
         
-        # Chuẩn hóa để so sánh độ tương đồng (loại bỏ dấu câu)
         prev_clean = re.sub(r"[.,\/#!$%\^&\*;:{}=\-_`~()?”“]", "", prev_text).strip()
         curr_clean = re.sub(r"[.,\/#!$%\^&\*;:{}=\-_`~()?”“]", "", curr_text).strip()
         
-        # Tính độ tương đồng cơ bản
         is_similar = False
         if prev_clean == curr_clean:
             is_similar = True
         elif len(prev_clean) > 10 and len(curr_clean) > 10:
-            # So sánh độ tương đồng ký tự nếu câu thoại đủ dài
             from difflib import SequenceMatcher
             ratio = SequenceMatcher(None, prev_clean, curr_clean).ratio()
             if ratio > 0.85:
                 is_similar = True
                 
-        # Kiểm tra khoảng cách thời gian giữa 2 segment liên tiếp
         time_gap = segments[i]["start"] - new_segments[-1]["end"]
         
-        # Nếu trùng lặp và khoảng cách thời gian ngắn (dưới 1.5 giây), tiến hành gộp
         if is_similar and time_gap < 1.5:
             print(f"[DEDUPLICATE] Phát hiện trùng lặp câu: '{new_translated[-1]}' và '{translated_texts[i]}'. Gộp thời gian phân đoạn.")
-            # Gộp thời gian kết thúc của segment cũ thành thời gian kết thúc của segment mới
             new_segments[-1]["end"] = max(new_segments[-1]["end"], segments[i]["end"])
         else:
             new_segments.append(dict(segments[i]))
@@ -555,11 +576,10 @@ def main():
         model = Llama(
             model_path=model_path,
             n_ctx=4096,
-            n_gpu_layers=-1,  # Nạp toàn bộ model weights lên GPU VRAM
+            n_gpu_layers=-1,
             chat_format="qwen"
         )
     else:
-        # Fallback sử dụng Transformers
         from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
         
         model_name = os.getenv("HF_MODEL_REPO", "Qwen/Qwen3.5-9B")
@@ -588,37 +608,36 @@ def main():
             f.write("")
         return
 
-    # Nhận diện mối quan hệ toàn cục
-    global_relationship = analyze_global_speaker_relationship(segments)
+    # Nhận diện mối quan hệ toàn cục bằng LLM
+    context_data = analyze_script_context_via_llm(model, tokenizer, segments, is_llamacpp=(engine == "llamacpp"))
+    global_relationship = context_data.get("role_play_rules", "")
+    replacements = context_data.get("replacements", {})
     print(f"[LLM] Phân tích bối cảnh toàn cục:\n{global_relationship}")
+    print(f"[LLM] Bản đồ thay thế xưng hô: {replacements}")
 
     print(f"[LLM] Bắt đầu dịch {len(segments)} câu thoại theo Batch hội thoại...")
     translated_texts = [None] * len(segments)
     
-    batch_size = 12  # Lô lý tưởng từ 10-15 câu
+    batch_size = 12
     idx = 0
     while idx < len(segments):
         batch_segments = segments[idx : idx + batch_size]
         print(f"[LLM] Đang dịch lô {idx + 1} đến {idx + len(batch_segments)}...")
         
-        # Thử dịch lô
         batch_results = translate_batch(
-            model, tokenizer, batch_segments, idx, global_relationship, is_llamacpp=(engine == "llamacpp")
+            model, tokenizer, batch_segments, idx, global_relationship, replacements=replacements, is_llamacpp=(engine == "llamacpp")
         )
         
         if batch_results:
-            # Gán kết quả dịch thành công
             for b_i, trans in enumerate(batch_results):
                 translated_texts[idx + b_i] = trans
             idx += len(batch_segments)
         else:
-            # Nếu dịch lô thất bại, chạy fallback dịch đơn lẻ cho từng câu trong lô đó
             print(f"[LLM] Gặp sự cố dịch lô, kích hoạt fallback dịch đơn lẻ cho {len(batch_segments)} câu...")
             for b_i in range(len(batch_segments)):
                 curr_idx = idx + b_i
                 seg = batch_segments[b_i]
                 
-                # Lấy lịch sử ngữ cảnh
                 history = []
                 start_h = max(0, curr_idx - 3)
                 for h_idx in range(start_h, curr_idx):
@@ -629,21 +648,18 @@ def main():
                         
                 print(f"[LLM] (Fallback) ({curr_idx+1}/{len(segments)}) Dịch: {seg['text']}")
                 trans_single = translate_single_text(
-                    model, tokenizer, seg["text"], history, global_relationship
+                    model, tokenizer, seg["text"], history, global_relationship, replacements=replacements
                 )
                 translated_texts[curr_idx] = trans_single
                 print(f"      -> Kết quả: {trans_single}")
                 
             idx += len(batch_segments)
 
-    # Bước 2: Tối ưu hóa phụ đề theo mạch ngữ cảnh (Review & Refine)
     is_llamacpp_engine = (engine == "llamacpp")
     translated_texts = refine_translated_subtitles(model, tokenizer, segments, translated_texts, global_relationship, is_llamacpp=is_llamacpp_engine)
 
-    # Loại bỏ trùng lặp liên tiếp trước khi ghi file
     segments, translated_texts = deduplicate_subtitles(segments, translated_texts)
 
-    # Ghi file SRT
     print(f"[LLM] Ghi kết quả dịch ra file SRT: {args.output}")
     with open(args.output, "w", encoding="utf-8") as f:
         for idx, seg in enumerate(segments):

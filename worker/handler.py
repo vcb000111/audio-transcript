@@ -67,6 +67,9 @@ def process_job(job):
         # Bước 2: Chạy bóc băng trong subprocess riêng biệt (giúp giải phóng hoàn toàn VRAM sau khi chạy xong)
         print(f"[Worker] Bắt đầu chạy tiến trình phụ Whisper ASR...")
         asr_cmd = [sys.executable, "whisper_transcribe.py", "--audio", temp_audio, "--output", temp_json]
+        initial_prompt = job.get("initial_prompt")
+        if initial_prompt:
+            asr_cmd.extend(["--initial_prompt", initial_prompt])
         asr_res = subprocess.run(asr_cmd)
         if asr_res.returncode != 0:
             raise Exception("Tiến trình Whisper ASR trả về mã lỗi.")
