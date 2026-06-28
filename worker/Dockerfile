@@ -6,6 +6,10 @@ ENV LD_LIBRARY_PATH=/usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cud
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
+# Sửa lỗi xung đột phiên bản libstdc++.so.6 của Conda/PyTorch bằng cách xóa bản cũ trong Conda và ép dùng bản của hệ thống Ubuntu 22.04
+RUN rm -f /opt/conda/lib/libstdc++.so.6
+ENV LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libstdc++.so.6
+
 # Tránh hộp thoại cấu hình tzdata tương tác gây treo tiến trình build
 ENV DEBIAN_FRONTEND=noninteractive
 
