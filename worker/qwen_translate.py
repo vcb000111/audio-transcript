@@ -48,6 +48,29 @@ def detect_speaker_info(text: str) -> str:
     
     return "VAI VẾ NHÂN VẬT: Cuộc trò chuyện thân mật trong gia đình giữa hai anh em. Hãy dịch xưng hô tự nhiên là 'Anh' - 'Em'."
 
+def google_translate_fallback(text: str) -> str:
+    """Gọi Google Translate API miễn phí làm phương án dự phòng cuối cùng để đảm bảo có tiếng Việt"""
+    try:
+        import requests
+        url = "https://translate.googleapis.com/translate_a/single"
+        params = {
+            "client": "gtx",
+            "sl": "ja",
+            "tl": "vi",
+            "dt": "t",
+            "q": text
+        }
+        res = requests.get(url, params=params, timeout=5)
+        if res.status_code == 200:
+            result = res.json()
+            translated = "".join([part[0] for part in result[0] if part[0]])
+            if translated:
+                print(f"[LLM-FALLBACK] Dịch thành công qua Google Translate: '{text}' -> '{translated}'")
+                return translated.strip()
+    except Exception as e:
+        print(f"[LLM-FALLBACK] Lỗi gọi Google Translate API: {e}")
+    return text
+
 def translate_single_text(model, tokenizer, text, history_context=[], retries=2):
     # Xác định loại động cơ dịch dựa trên instance của model
     is_llamacpp = False
@@ -65,7 +88,8 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
         "RÀNG BUỘC ĐẦU RA:\n"
         "- Bản dịch bắt buộc phải là 100% TIẾNG VIỆT tự nhiên, thuần Việt, dễ hiểu.\n"
         "- Tuyệt đối KHÔNG chứa bất kỳ ký tự chữ Hán (Trung/Nhật), chữ Thái, chữ Hàn, hay chữ viết lạ nào khác.\n"
-        "- Chỉ trả về duy nhất câu đã dịch sang tiếng Việt, không giải thích, không viết ghi chú, không markdown, không lặp lại câu gốc."
+        "- Chỉ trả về duy nhất câu đã dịch sang tiếng Việt, không giải thích, không viết ghi chú, không markdown, không lặp lại câu gốc.\n"
+        "- TẤT CẢ suy nghĩ, lập luận, hoặc phân tích trung gian bắt buộc phải được viết trong thẻ <think>...</think> ở đầu câu trả lời. Tuyệt đối không viết suy nghĩ ở ngoài thẻ."
     )
     
     context_str = ""
@@ -111,10 +135,11 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
                 ]
                 response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
                 
-            # Loại bỏ thẻ think nếu có
+            # Loại bỏ thẻ think và suy nghĩ tự do (free-form thinking process) nếu có
             response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+            response = re.sub(r"(Thinking Process|Thought|Analysis):.*?(?=\n\n|\Z)", "", response, flags=re.DOTALL | re.IGNORECASE).strip()
             # Làm sạch phản hồi
-            response = response.strip('"\'')
+            response = response.strip('"\' \n\t')
             
             # Kiểm tra xem bản dịch có chứa chữ nước ngoài hay câu từ chối dịch không
             is_refusal = any(k in response for k in ["không thể", "yêu cầu", "phù hợp", "từ chối", "đề xuất", "chính sách"])
@@ -130,6 +155,7 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
     print(f"[LLM] Kích hoạt chế độ dịch tối giản (Minimalist Prompt) cho câu nhạy cảm: '{text}'")
     try:
         minimal_messages = [
+            {"role": "system", "content": "Bạn là biên dịch viên tiếng Nhật sang tiếng Việt. Chỉ trả về duy nhất câu dịch tiếng Việt thuần túy, không chứa chữ Nhật, không giải thích."},
             {"role": "user", "content": f"Dịch câu thoại này sang tiếng Việt: {text}"}
         ]
         if is_llamacpp:
@@ -149,14 +175,18 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
             response_min = tokenizer.batch_decode(gen_ids_min, skip_special_tokens=True)[0].strip()
             
         response_min = re.sub(r"<think>.*?</think>", "", response_min, flags=re.DOTALL).strip()
-        response_min = response_min.strip('"\'')
+        response_min = re.sub(r"(Thinking Process|Thought|Analysis):.*?(?=\n\n|\Z)", "", response_min, flags=re.DOTALL | re.IGNORECASE).strip()
+        response_min = response_min.strip('"\' \n\t')
+        
         is_refusal_min = any(k in response_min for k in ["không thể", "yêu cầu", "phù hợp", "từ chối"])
         if response_min and response_min != text and not contains_foreign_script(response_min) and not is_refusal_min:
             return response_min
     except Exception as e_min:
         print(f"[LLM] Lỗi ở chế độ tối giản: {e_min}")
         
-    return text  # Fallback cuối cùng trả về câu gốc
+    # 3. Sử dụng Google Translate API làm phương án cứu cánh cuối cùng để bảo đảm 100% có tiếng Việt
+    print(f"[LLM-FALLBACK] Sử dụng Google Translate cho câu không thể dịch: '{text}'")
+    return google_translate_fallback(text)
 
 def main():
     parser = argparse.ArgumentParser(description="Translate Japanese text to Vietnamese using Qwen Hybrid Engine")
