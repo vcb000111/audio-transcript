@@ -37,7 +37,8 @@ RUN pip install --no-cache-dir \
 ENV HF_HUB_ENABLE_HF_TRANSFER=1
 
 # Thiết lập biến môi trường biên dịch CUDA cho llama-cpp-python
-ENV CMAKE_ARGS="-DLLAMA_CUDA=on"
+# Chỉ định cứng các kiến trúc CUDA (80;86;89) để build thành công trên GitHub runner không có GPU
+ENV CMAKE_ARGS="-DGGML_CUDA=on -DLLAMA_CUDA=on -DCMAKE_CUDA_ARCHITECTURES=80;86;89"
 RUN pip install llama-cpp-python --force-reinstall --upgrade --no-cache-dir
 
 # Copy file cache và tải trước các model weights về cache của image
