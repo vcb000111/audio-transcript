@@ -8,7 +8,8 @@ Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận
 - Khắc phục sự cố không tải được mô hình dịch thuật do tệp nguồn trên dịch vụ lưu trữ thay đổi cấu trúc cấu hình tải trước.
 - Tối ưu hóa tham số bóc băng Whisper ASR (`condition_on_previous_text=False`) để giải quyết triệt để lỗi lặp câu vô hạn (hallucination loop).
 - Nâng cấp mô hình Qwen LLM sang chế độ dịch thuật theo cụm (Batch-of-Context) kèm cơ chế phòng chống lệch dòng phụ đề (Desync Fallback).
-- Khắc phục lỗi hiển thị tiền tố số thứ tự lọt vào phụ đề dịch bằng cách lọc regex đầu ra của `translate_batch`.
+- Khắc phục lỗi hiển thị tiền tố số thứ tự lọt vào phụ đề dịch bằng cách lọc regex đầu ra của `translate_batch` và `refine_translated_subtitles` (sửa triệt để lỗi đánh số thừa `1. `, `2. ` của LLM).
+- Tích hợp cơ chế bảo toàn viết hoa đầu từ (Capitalization Preserving) khi thực hiện ánh xạ/thay thế các đại từ xưng hô động.
 - Phát triển cơ chế LLM Script Context Analyzer tự động trích lọc câu thoại mẫu và dùng LLM phân tích bối cảnh để sinh ra quy tắc xưng hô và bản đồ thay thế đại từ JSON động cho mọi bộ phim.
 - Bổ sung thuật toán hậu xử lý lọc trùng lặp liên tiếp (`deduplicate_subtitles`) đối với các câu có khoảng thời gian cực ngắn và độ tương đồng cao.
 - Linh hoạt hóa tham số bóc băng: Hỗ trợ nhận và truyền `--initial_prompt` động từ Hub qua Worker Daemon vào Whisper ASR nhằm định hướng phiên âm chính xác cho bất kỳ phim nào.

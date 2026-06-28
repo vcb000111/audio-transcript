@@ -130,16 +130,32 @@ def analyze_script_context_via_llm(model, tokenizer, segments: list, is_llamacpp
     return default_rules
 
 def clean_vietnamese_pronouns(text: str, replacements: dict) -> str:
-    """Làm sạch các từ xưng hô mặc định từ Google Translate dựa trên bản đồ thay thế động"""
+    """Làm sạch các từ xưng hô mặc định từ Google Translate dựa trên bản đồ thay thế động, bảo toàn viết hoa đầu từ"""
     if not replacements:
         return text
     for target, rep in replacements.items():
+        def replace_match(match):
+            word = match.group(0)
+            if word.istitle():
+                return rep.capitalize()
+            elif word.isupper():
+                return rep.upper()
+            return rep
+            
         pattern = re.compile(rf"\b{re.escape(target)}\b", re.IGNORECASE)
-        text = pattern.sub(rep, text)
+        text = pattern.sub(replace_match, text)
         
     # Các từ xưng hô cấm lọt
-    text = re.sub(r"\btao\b", "em", text, flags=re.IGNORECASE)
-    text = re.sub(r"\bmày\b", "anh", text, flags=re.IGNORECASE)
+    def clean_forbidden(match):
+        word = match.group(0)
+        rep = "em" if word.lower() == "tao" else "anh"
+        if word.istitle():
+            return rep.capitalize()
+        elif word.isupper():
+            return rep.upper()
+        return rep
+
+    text = re.sub(r"\b(tao|mày)\b", clean_forbidden, text, flags=re.IGNORECASE)
     return text
 
 def detect_speaker_info(text: str) -> str:
@@ -200,6 +216,7 @@ def translate_single_text(model, tokenizer, text, history_context=[], global_rel
         "- KHÔNG ĐƯỢC SUY NGHĨ. Tuyệt đối KHÔNG viết bất kỳ suy nghĩ, lập luận, phân tích hay thảo luận nào.\n"
         "- KHÔNG sử dụng thẻ <think>...</think> hoặc viết bất kỳ từ nào như 'Thinking Process', 'Thought' hay 'Analysis'.\n"
         "- Dịch thẳng sang tiếng Việt thuần túy, tự nhiên, văn phong phim ảnh.\n"
+        "- Tuyệt đối KHÔNG viết bất kỳ chữ Hán, chữ Nhật, hoặc giải thích bằng tiếng Anh/tiếng Trung nào.\n"
         "- Chỉ trả về duy nhất bản dịch tiếng Việt, không lặp lại câu gốc, không giải thích."
     )
     
@@ -352,7 +369,8 @@ def refine_translated_subtitles(model, tokenizer, segments, translated_texts, gl
             "   - KHÔNG ĐƯỢC SUY NGHĨ. Tuyệt đối KHÔNG viết suy nghĩ, giải thích hay bất kỳ chữ gì ngoài danh sách kết quả.\n"
             "   - Chỉ trả về danh sách các câu đã tối ưu với định dạng chính xác từng dòng: 'Số_thứ_tự. Câu_dịch_tối_ưu'\n"
             "   - Số thứ tự phải khớp chính xác 100% với danh sách đầu vào.\n"
-            "   - Tuyệt đối không sử dụng thẻ <think> hoặc viết tiếng Anh."
+            "   - Tuyệt đối không sử dụng thẻ <think> hoặc viết tiếng Anh.\n"
+            "   - Tuyệt đối KHÔNG viết bất kỳ chữ Hán hay chữ Nhật nào trong bản dịch."
         )
         
         user_prompt = (
@@ -405,6 +423,8 @@ def refine_translated_subtitles(model, tokenizer, segments, translated_texts, gl
                     
                     if batch_start <= (num - 1) < batch_end:
                         if refined_val and not contains_foreign_script(refined_val):
+                            # Lọc bỏ số thứ tự phụ nếu LLM lỡ sinh ra dạng "1. Câu dịch"
+                            refined_val = re.sub(r"^\d+\.\s*", "", refined_val).strip()
                             refined_texts[num - 1] = refined_val
                             parsed_count += 1
             
@@ -433,6 +453,7 @@ def translate_batch(model, tokenizer, batch_segments, start_idx, global_relation
         "- TUYỆT ĐỐI KHÔNG thêm số thứ tự, chỉ số hoặc dấu chấm vào đầu giá trị dịch (ví dụ: KHÔNG dịch thành '1. Câu dịch', chỉ dịch thành 'Câu dịch').\n"
         "- KHÔNG ĐƯỢC SUY NGHĨ. Không viết bất kỳ suy nghĩ hay giải thích nào ngoài chuỗi JSON.\n"
         "- Tuyệt đối KHÔNG sử dụng thẻ <think>...</think> hoặc viết tiếng Anh.\n"
+        "- Tuyệt đối KHÔNG viết bất kỳ chữ Hán hay chữ Nhật nào trong giá trị dịch.\n"
         "Ví dụ định dạng đầu ra:\n"
         "{\n"
         '  "1": "Bản dịch câu 1",\n'
