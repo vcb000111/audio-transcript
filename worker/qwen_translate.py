@@ -395,6 +395,7 @@ def translate_batch(model, tokenizer, batch_segments, start_idx, global_relation
         "QUY TẮC BẮT BUỘC:\n"
         "- Đảm bảo xưng hô nhất quán, tự nhiên, văn phong phim ảnh.\n"
         "- Trả về kết quả dưới dạng một đối tượng JSON hợp lệ duy nhất, với khóa là chỉ số câu thoại (dưới dạng chuỗi) và giá trị là câu dịch tiếng Việt thuần túy.\n"
+        "- TUYỆT ĐỐI KHÔNG thêm số thứ tự, chỉ số hoặc dấu chấm vào đầu giá trị dịch (ví dụ: KHÔNG dịch thành '1. Câu dịch', chỉ dịch thành 'Câu dịch').\n"
         "- KHÔNG ĐƯỢC SUY NGHĨ. Không viết bất kỳ suy nghĩ hay giải thích nào ngoài chuỗi JSON.\n"
         "- Tuyệt đối KHÔNG sử dụng thẻ <think>...</think> hoặc viết tiếng Anh.\n"
         "Ví dụ định dạng đầu ra:\n"
@@ -464,6 +465,8 @@ def translate_batch(model, tokenizer, batch_segments, start_idx, global_relation
             key = str(start_idx + idx + 1)
             if key in result_dict:
                 trans = result_dict[key].strip()
+                # Loại bỏ các tiền tố số thứ tự lọt vào giá trị dịch (ví dụ: "1. Bản dịch" -> "Bản dịch")
+                trans = re.sub(r"^\d+\.\s*", "", trans).strip()
                 # Kiểm tra bản dịch sạch (không rỗng và không chứa chữ ngoại lai)
                 if trans and not contains_foreign_script(trans):
                     validated_dict[key] = trans

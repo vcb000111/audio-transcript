@@ -8,8 +8,10 @@ Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận
 - Khắc phục sự cố không tải được mô hình dịch thuật do tệp nguồn trên dịch vụ lưu trữ thay đổi cấu trúc cấu hình tải trước.
 - Tối ưu hóa tham số bóc băng Whisper ASR (`condition_on_previous_text=False`) để giải quyết triệt để lỗi lặp câu vô hạn (hallucination loop).
 - Nâng cấp mô hình Qwen LLM sang chế độ dịch thuật theo cụm (Batch-of-Context) kèm cơ chế phòng chống lệch dòng phụ đề (Desync Fallback).
+- Khắc phục lỗi hiển thị tiền tố số thứ tự lọt vào phụ đề dịch bằng cách lọc regex đầu ra của `translate_batch`.
 - Tích hợp tính năng tự động nhận diện mối quan hệ nhân vật chính toàn cục (Global Speaker Relationship) giúp thống nhất xưng hô tự nhiên.
 - Bổ sung thuật toán hậu xử lý lọc trùng lặp liên tiếp (`deduplicate_subtitles`) đối với các câu có khoảng thời gian cực ngắn và độ tương đồng cao.
+- Thêm tên nhân vật `Rino` vào `initial_prompt` của Whisper ASR để tránh lỗi nhận diện nhầm âm thanh (Rino nghe nhầm thành con chó/inu) khi không dùng ngữ cảnh trượt.
 
 ## [1.0.0] - 2026-06-26
 

@@ -20,8 +20,8 @@ def main():
         vad_filter=True,
         # VAD Parameters nặng để lọc tiếng rên/thở dốc ngắn
         vad_parameters=dict(min_speech_duration_ms=600, threshold=0.5),
-        # Mồi ngữ cảnh bằng từ lóng JAV đặc trưng giúp mô hình đoán chính xác hơn
-        initial_prompt="Japanese adult video, JAV, rên rỉ, thỏ thẻ, yamete kudasai, iku, senpai, sensei, kimochi, gomen",
+        # Mồi ngữ cảnh bằng từ lóng JAV và tên nhân vật giúp mô hình đoán chính xác hơn
+        initial_prompt="Japanese adult video, JAV, Rino, Rino-chan, 梨乃, リノ, rên rỉ, thỏ thẻ, yamete kudasai, iku, senpai, sensei, kimochi, gomen",
         condition_on_previous_text=False
     )
     
