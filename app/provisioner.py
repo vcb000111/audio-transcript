@@ -216,13 +216,6 @@ def rent_new_gpu() -> str:
             print(f"[Provisioner] Thuê máy thành công! Contract ID / Instance ID mới: {contract_id}")
             return str(contract_id)
         else:
-            print(f"[Provisioner] Lỗi thuê máy: Status {rent_res.status_code} - Phản hồi: {rent_res.text}")es = requests.put(rent_url, json=payload, headers=get_headers(), timeout=15)
-        
-        if rent_res.status_code == 200:
-            contract_id = rent_res.json().get("new_contract")
-            print(f"[Provisioner] Thuê máy thành công! Contract ID / Instance ID mới: {contract_id}")
-            return str(contract_id)
-        else:
             print(f"[Provisioner] Lỗi thuê máy: Status {rent_res.status_code} - Phản hồi: {rent_res.text}")
             
     except Exception as e:
