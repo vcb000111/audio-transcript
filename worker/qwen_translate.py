@@ -82,14 +82,15 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
         pass
 
     speaker_hint = detect_speaker_info(text)
+    # Hướng dẫn cực kỳ nghiêm khắc cấm suy nghĩ và cấm viết thẻ think
     system_prompt = (
-        "Bạn là một biên dịch viên phụ đề phim gia đình/tình cảm Nhật Bản sang tiếng Việt chuyên nghiệp.\n"
-        "Hãy dịch câu thoại tiếng Nhật được yêu cầu sang tiếng Việt một cách tự nhiên, trôi chảy, đúng văn phong phim ảnh Việt Nam.\n"
-        "RÀNG BUỘC ĐẦU RA:\n"
-        "- Bản dịch bắt buộc phải là 100% TIẾNG VIỆT tự nhiên, thuần Việt, dễ hiểu.\n"
-        "- Tuyệt đối KHÔNG chứa bất kỳ ký tự chữ Hán (Trung/Nhật), chữ Thái, chữ Hàn, hay chữ viết lạ nào khác.\n"
-        "- Chỉ trả về duy nhất câu đã dịch sang tiếng Việt, không giải thích, không viết ghi chú, không markdown, không lặp lại câu gốc.\n"
-        "- TẤT CẢ suy nghĩ, lập luận, hoặc phân tích trung gian bắt buộc phải được viết trong thẻ <think>...</think> ở đầu câu trả lời. Tuyệt đối không viết suy nghĩ ở ngoài thẻ."
+        "Bạn là một biên dịch viên phụ đề phim Nhật Bản sang tiếng Việt chuyên nghiệp.\n"
+        "Nhiệm vụ: Dịch trực tiếp câu thoại được yêu cầu sang tiếng Việt.\n"
+        "QUY TẮC BẮT BUỘC:\n"
+        "- KHÔNG ĐƯỢC SUY NGHĨ. Tuyệt đối KHÔNG viết bất kỳ suy nghĩ, lập luận, phân tích hay thảo luận nào.\n"
+        "- KHÔNG sử dụng thẻ <think>...</think> hoặc viết bất kỳ từ nào như 'Thinking Process', 'Thought' hay 'Analysis'.\n"
+        "- Dịch thẳng sang tiếng Việt thuần túy, tự nhiên, văn phong phim ảnh.\n"
+        "- Chỉ trả về duy nhất bản dịch tiếng Việt, không lặp lại câu gốc, không giải thích."
     )
     
     context_str = ""
@@ -111,12 +112,15 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
     for attempt in range(retries):
         try:
             if is_llamacpp:
+                # 151357 là ID của token '<think>' trong tokenizer của Qwen
+                # Đặt logit_bias cực âm -100 để ngăn cấm tuyệt đối model sinh ra token '<think>'
                 response_data = model.create_chat_completion(
                     messages=messages,
                     max_tokens=256,
-                    temperature=0.5 if attempt == retries - 1 else 0.7,
+                    temperature=0.0 if attempt == retries - 1 else 0.3, # Giảm nhiệt độ thấp để model dịch chính xác thay vì sáng tạo/suy nghĩ tự do
                     top_p=0.8,
-                    top_k=20
+                    top_k=20,
+                    logit_bias={"151357": -100.0}
                 )
                 response = response_data["choices"][0]["message"]["content"].strip()
             else:
@@ -162,9 +166,10 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
             response_data = model.create_chat_completion(
                 messages=minimal_messages,
                 max_tokens=256,
-                temperature=0.7,
+                temperature=0.1,
                 top_p=0.8,
-                top_k=20
+                top_k=20,
+                logit_bias={"151357": -100.0}
             )
             response_min = response_data["choices"][0]["message"]["content"].strip()
         else:
@@ -214,7 +219,8 @@ def main():
         model = Llama(
             model_path=model_path,
             n_ctx=4096,
-            n_gpu_layers=-1  # Nạp toàn bộ model weights lên GPU VRAM
+            n_gpu_layers=-1,  # Nạp toàn bộ model weights lên GPU VRAM
+            chat_format="qwen"
         )
     else:
         # Fallback sử dụng Transformers
