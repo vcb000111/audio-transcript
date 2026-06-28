@@ -4,8 +4,12 @@ Tất cả các thay đổi quan trọng của dự án sẽ được ghi nhận
 
 ## [1.0.1] - 2026-06-28
 
-### 🛠️ Sửa lỗi
+### 🛠️ Sửa lỗi & Tối ưu hóa
 - Khắc phục sự cố không tải được mô hình dịch thuật do tệp nguồn trên dịch vụ lưu trữ thay đổi cấu trúc cấu hình tải trước.
+- Tối ưu hóa tham số bóc băng Whisper ASR (`condition_on_previous_text=False`) để giải quyết triệt để lỗi lặp câu vô hạn (hallucination loop).
+- Nâng cấp mô hình Qwen LLM sang chế độ dịch thuật theo cụm (Batch-of-Context) kèm cơ chế phòng chống lệch dòng phụ đề (Desync Fallback).
+- Tích hợp tính năng tự động nhận diện mối quan hệ nhân vật chính toàn cục (Global Speaker Relationship) giúp thống nhất xưng hô tự nhiên.
+- Bổ sung thuật toán hậu xử lý lọc trùng lặp liên tiếp (`deduplicate_subtitles`) đối với các câu có khoảng thời gian cực ngắn và độ tương đồng cao.
 
 ## [1.0.0] - 2026-06-26
 
