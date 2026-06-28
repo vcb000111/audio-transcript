@@ -38,24 +38,24 @@ def cache():
     # 1. Tải cache model Whisper qua HuggingFace Hub snapshot (nặng ~3GB)
     download_with_retry(repo_id="Systran/faster-whisper-large-v3")
     
-    # 2. Tải cache model Qwen/Qwen3.5-9B (Safetensors) phục vụ chạy động cơ Transformers (nặng ~18GB)
-    model_name = "Qwen/Qwen3.5-9B"
-    print(f"[Cache] Đang tải tokenizer cho {model_name}...")
-    for attempt in range(5):
-        try:
-            AutoTokenizer.from_pretrained(model_name)
-            break
-        except Exception as e:
-            print(f"[Cache] Lỗi tải tokenizer (Lần thử {attempt+1}): {e}")
-            if attempt < 4:
-                time.sleep(10)
-            else:
-                raise e
-                
-    download_with_retry(
-        repo_id=model_name,
-        ignore_patterns=["*.msgpack", "*.h5", "*.ot"]
-    )
+    # 2. [TẠM TẮT ĐỂ GIẢM TẢI] Tải cache model Qwen/Qwen3.5-9B (Safetensors) phục vụ chạy động cơ Transformers (nặng ~18GB)
+    # model_name = "Qwen/Qwen3.5-9B"
+    # print(f"[Cache] Đang tải tokenizer cho {model_name}...")
+    # for attempt in range(5):
+    #     try:
+    #         AutoTokenizer.from_pretrained(model_name)
+    #         break
+    #     except Exception as e:
+    #         print(f"[Cache] Lỗi tải tokenizer (Lần thử {attempt+1}): {e}")
+    #         if attempt < 4:
+    #             time.sleep(10)
+    #         else:
+    #             raise e
+    #             
+    # download_with_retry(
+    #     repo_id=model_name,
+    #     ignore_patterns=["*.msgpack", "*.h5", "*.ot"]
+    # )
     
     # 3. Tải file GGUF bản Uncensored Q8_0 phục vụ chạy động cơ LlamaCpp (nặng ~9.5GB)
     gguf_repo = "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive"
