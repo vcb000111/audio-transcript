@@ -223,6 +223,108 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
     print(f"[LLM-FALLBACK] Sử dụng Google Translate cho câu không thể dịch: '{text}'")
     return google_translate_fallback(text)
 
+def refine_translated_subtitles(model, tokenizer, segments, translated_texts, is_llamacpp=True) -> list:
+    """Đọc lại toàn bộ mạch hội thoại để tối ưu hóa phụ đề, thống nhất xưng hô và trau chuốt câu chữ"""
+    print("[LLM-REFINE] Bắt đầu bước 2: Đọc lại toàn bộ hội thoại và tối ưu hóa phụ đề...")
+    
+    total_len = len(segments)
+    refined_texts = list(translated_texts) # Khởi tạo danh sách kết quả tối ưu
+    
+    # Chia phụ đề thành các batch nhỏ khoảng 25 câu để tránh tràn token đầu ra của LLM
+    batch_size = 25
+    for batch_start in range(0, total_len, batch_size):
+        batch_end = min(batch_start + batch_size, total_len)
+        print(f"[LLM-REFINE] Đang tối ưu hóa phân đoạn từ câu {batch_start + 1} đến {batch_end}...")
+        
+        # Tạo prompt danh sách hội thoại cho batch này
+        dialogue_list = []
+        for i in range(batch_start, batch_end):
+            orig = segments[i]["text"]
+            draft = translated_texts[i]
+            dialogue_list.append(f"{i + 1}. [Gốc]: {orig}\n   [Bản dịch tạm]: {draft}")
+        
+        dialogue_text = "\n".join(dialogue_list)
+        
+        system_prompt = (
+            "Bạn là một biên tập viên phụ đề phim Nhật Bản sang tiếng Việt chuyên nghiệp.\n"
+            "Nhiệm vụ: Rà soát, tối ưu hóa và làm mượt các bản dịch tạm thời bên dưới để phù hợp với ngữ cảnh hội thoại của phim.\n"
+            "YÊU CẦU TỐI ƯU HÓA:\n"
+            "1. Thống nhất xưng hô: Dựa vào mạch truyện để sửa xưng hô đồng nhất từ đầu đến cuối (ví dụ: Anh - Em cho cặp anh em Rino). Tránh xưng hô bất nhất gượng gạo.\n"
+            "2. Làm mượt văn phong: Trau chuốt các bản dịch tạm bị thô cứng, gượng gạo thành câu văn trôi chảy, tự nhiên chuẩn phim ảnh, nhưng tuyệt đối giữ nguyên nghĩa gốc.\n"
+            "3. RÀNG BUỘC ĐẦU RA:\n"
+            "   - KHÔNG ĐƯỢC SUY NGHĨ. Tuyệt đối KHÔNG viết suy nghĩ, giải thích hay bất kỳ chữ gì ngoài danh sách kết quả.\n"
+            "   - Chỉ trả về danh sách các câu đã tối ưu với định dạng chính xác từng dòng: 'Số_thứ_tự. Câu_dịch_tối_ưu'\n"
+            "   - Số thứ tự phải khớp chính xác 100% với danh sách đầu vào.\n"
+            "   - Tuyệt đối không sử dụng thẻ <think> hoặc viết tiếng Anh."
+        )
+        
+        user_prompt = (
+            "Dưới đây là danh sách các câu thoại cần tối ưu hóa. Hãy trả về danh sách đã sửa đổi:\n\n"
+            f"{dialogue_text}"
+        )
+        
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt}
+        ]
+        
+        try:
+            if is_llamacpp:
+                # 151357 là ID token '<think>' của Qwen, đặt logit_bias để cấm tuyệt đối suy nghĩ
+                response_data = model.create_chat_completion(
+                    messages=messages,
+                    max_tokens=2048, # Tăng max_tokens đủ rộng để chứa kết quả dịch của 25 câu
+                    temperature=0.2, # Nhiệt độ thấp để model bám sát cấu trúc
+                    top_p=0.8,
+                    top_k=20,
+                    logit_bias={"151357": -100.0}
+                )
+                response = response_data["choices"][0]["message"]["content"].strip()
+            else:
+                text_in = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                model_inputs = tokenizer([text_in], return_tensors="pt").to(model.device)
+                generated_ids = model.generate(
+                    **model_inputs,
+                    max_new_tokens=2048,
+                    temperature=0.2,
+                    top_p=0.8,
+                    top_k=20
+                )
+                generated_ids = [
+                    output_ids[len(input_ids):] for input_ids, output_ids in zip(model_inputs.input_ids, generated_ids)
+                ]
+                response = tokenizer.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
+            
+            # Làm sạch tàn dư suy nghĩ nếu có
+            response = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL).strip()
+            response = re.sub(r"(Thinking Process|Thought|Analysis):.*?(?=\n\n|\Z)", "", response, flags=re.DOTALL | re.IGNORECASE).strip()
+            response = response.strip()
+            
+            # Phân tích kết quả trả về của LLM theo định dạng 'Số_thứ_tự. Câu_dịch'
+            lines = response.split("\n")
+            parsed_count = 0
+            for line in lines:
+                line = line.strip()
+                # Khớp định dạng: bắt đầu bằng số thứ tự + dấu chấm + khoảng trắng
+                match = re.match(r"^(\d+)\.\s*(.*)$", line)
+                if match:
+                    num = int(match.group(1))
+                    refined_val = match.group(2).strip()
+                    
+                    # Xác thực số thứ tự nằm trong phạm vi của batch hiện tại
+                    if batch_start <= (num - 1) < batch_end:
+                        # Chỉ áp dụng nếu bản dịch tối ưu sạch (không chứa tiếng Nhật) và không rỗng
+                        if refined_val and not contains_foreign_script(refined_val):
+                            refined_texts[num - 1] = refined_val
+                            parsed_count += 1
+            
+            print(f"[LLM-REFINE] Đã tối ưu hóa thành công {parsed_count} trên {batch_end - batch_start} câu thoại.")
+            
+        except Exception as e:
+            print(f"[LLM-REFINE] Lỗi khi tối ưu hóa batch {batch_start + 1}-{batch_end}: {e}. Giữ nguyên bản dịch tạm.")
+            
+    return refined_texts
+
 def main():
     parser = argparse.ArgumentParser(description="Translate Japanese text to Vietnamese using Qwen Hybrid Engine")
     parser.add_argument("--input", required=True, help="Đường dẫn file JSON bóc băng tạm")
@@ -301,6 +403,10 @@ def main():
         translated_text = translate_single_text(model, tokenizer, text, history)
         translated_texts.append(translated_text)
         print(f"      -> Kết quả: {translated_text}")
+
+    # Bước 2: Tối ưu hóa phụ đề theo mạch ngữ cảnh (Review & Refine)
+    is_llamacpp_engine = (engine == "llamacpp")
+    translated_texts = refine_translated_subtitles(model, tokenizer, segments, translated_texts, is_llamacpp=is_llamacpp_engine)
 
     # Ghi file SRT
     print(f"[LLM] Ghi kết quả dịch ra file SRT: {args.output}")
