@@ -117,10 +117,9 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
                 response_data = model.create_chat_completion(
                     messages=messages,
                     max_tokens=256,
-                    temperature=0.0 if attempt == retries - 1 else 0.3, # Giảm nhiệt độ thấp để model dịch chính xác thay vì sáng tạo/suy nghĩ tự do
+                    temperature=0.5 if attempt == retries - 1 else 0.7, # Nâng nhiệt độ để dịch văn phong tự nhiên hơn
                     top_p=0.8,
-                    top_k=20,
-                    logit_bias={"151357": -100.0}
+                    top_k=20
                 )
                 response = response_data["choices"][0]["message"]["content"].strip()
             else:
@@ -179,10 +178,9 @@ def translate_single_text(model, tokenizer, text, history_context=[], retries=2)
             response_data = model.create_chat_completion(
                 messages=minimal_messages,
                 max_tokens=256,
-                temperature=0.1,
+                temperature=0.4, # Nâng nhiệt độ một chút
                 top_p=0.8,
-                top_k=20,
-                logit_bias={"151357": -100.0}
+                top_k=20
             )
             response_min = response_data["choices"][0]["message"]["content"].strip()
         else:
@@ -270,14 +268,12 @@ def refine_translated_subtitles(model, tokenizer, segments, translated_texts, is
         
         try:
             if is_llamacpp:
-                # 151357 là ID token '<think>' của Qwen, đặt logit_bias để cấm tuyệt đối suy nghĩ
                 response_data = model.create_chat_completion(
                     messages=messages,
                     max_tokens=2048, # Tăng max_tokens đủ rộng để chứa kết quả dịch của 25 câu
-                    temperature=0.2, # Nhiệt độ thấp để model bám sát cấu trúc
+                    temperature=0.5, # Tăng nhiệt độ lên 0.5 để mô hình thông minh tự sửa lỗi và chuyển xưng hô tự nhiên
                     top_p=0.8,
-                    top_k=20,
-                    logit_bias={"151357": -100.0}
+                    top_k=20
                 )
                 response = response_data["choices"][0]["message"]["content"].strip()
             else:
@@ -286,7 +282,7 @@ def refine_translated_subtitles(model, tokenizer, segments, translated_texts, is
                 generated_ids = model.generate(
                     **model_inputs,
                     max_new_tokens=2048,
-                    temperature=0.2,
+                    temperature=0.5,
                     top_p=0.8,
                     top_k=20
                 )

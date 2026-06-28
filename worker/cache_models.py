@@ -58,8 +58,8 @@ def cache():
     # )
     
     # 3. Tải file GGUF bản Uncensored Q8_0 phục vụ chạy động cơ LlamaCpp (nặng ~9.5GB)
-    gguf_repo = "HauhauCS/Qwen3.5-9B-Uncensored-HauhauCS-Aggressive"
-    gguf_file = "Qwen3.5-9B-Uncensored-HauhauCS-Aggressive-Q8_0.gguf"
+    gguf_repo = "Qwen/Qwen2.5-14B-Instruct-GGUF"
+    gguf_file = "qwen2.5-14b-instruct-q8_0.gguf"
     download_file_with_retry(repo_id=gguf_repo, filename=gguf_file)
     
     print("[Cache] Hoàn tất lưu cache toàn bộ model.")
